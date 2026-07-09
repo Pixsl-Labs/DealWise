@@ -1,0 +1,1 @@
+"""DealWise GTK user interface."""
