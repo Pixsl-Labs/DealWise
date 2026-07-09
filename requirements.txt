@@ -2,4 +2,5 @@
 # Install with:
 # sudo apt install python3-gi gir1.2-gtk-4.0
 #
-# No pip dependencies are required for Phase 1.
+# Phase 2 uses only Python standard-library networking for the Vinted public connector.
+# No pip dependencies are required yet.

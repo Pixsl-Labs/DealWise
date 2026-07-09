@@ -63,7 +63,10 @@ class SavedSearch:
             excluded_keywords=_string_list(data.get("excluded_keywords")),
             refresh_interval_minutes=max(
                 MIN_REFRESH_INTERVAL_MINUTES,
-                int(data.get("refresh_interval_minutes") or DEFAULT_REFRESH_INTERVAL_MINUTES),
+                int(
+                    data.get("refresh_interval_minutes")
+                    or DEFAULT_REFRESH_INTERVAL_MINUTES
+                ),
             ),
             created_at=str(
                 data.get("created_at") or datetime.now(timezone.utc).isoformat()
@@ -97,6 +100,71 @@ class SavedSearch:
 
 
 @dataclass(slots=True)
+class MarketplaceListing:
+    """A normalised listing returned by a marketplace connector."""
+
+    id: str
+    marketplace: str
+    title: str
+    price: float | None
+    currency: str
+    url: str
+    image_url: str | None = None
+    seller_name: str | None = None
+    condition: str | None = None
+    location: str | None = None
+    source_query: str | None = None
+    search_id: str | None = None
+    found_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def dedupe_key(self) -> str:
+        if self.id:
+            return f"{self.marketplace.lower()}:{self.id}"
+
+        return f"{self.marketplace.lower()}:{self.url}"
+
+    def price_label(self) -> str:
+        if self.price is None:
+            return "Price unknown"
+
+        symbol = "£" if self.currency.upper() == "GBP" else f"{self.currency} "
+        return f"{symbol}{self.price:.2f}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "marketplace": self.marketplace,
+            "title": self.title,
+            "price": self.price,
+            "currency": self.currency,
+            "url": self.url,
+            "image_url": self.image_url,
+            "seller_name": self.seller_name,
+            "condition": self.condition,
+            "location": self.location,
+            "source_query": self.source_query,
+            "search_id": self.search_id,
+            "found_at": self.found_at,
+            "raw": self.raw,
+        }
+
+
+@dataclass(slots=True)
+class MarketplaceSearchResult:
+    """Result returned from a marketplace connector search call."""
+
+    marketplace: str
+    query: str
+    listings: list[MarketplaceListing]
+    status_message: str
+    error: str | None = None
+
+
+@dataclass(slots=True)
 class RuntimeStats:
     """Small snapshot used by the dashboard."""
 
@@ -104,7 +172,9 @@ class RuntimeStats:
     saved_searches: int
     searches_running: int
     listings_analysed: int
+    live_results: int
     refreshes_completed: int
+    connector_status: str
     running_since: datetime | None
     last_refresh_at: datetime | None
 

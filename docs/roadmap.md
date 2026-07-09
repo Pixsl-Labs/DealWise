@@ -308,7 +308,7 @@ status
 
 # Phase 2 — Marketplace Connector Interface and Vinted Public Search
 
-Status: Planned
+Status: Complete
 
 ## Goal
 
@@ -854,8 +854,8 @@ MacroWise:
 1. Finish Phase 1 testing.
 2. Commit Phase 1.
 3. Add this roadmap.
-4. Add Phase 1.5 local saved listings/watchlist.
-5. Then move to Phase 2 Vinted public search.
+4. Phase 2 is now complete with the marketplace connector interface and Vinted public search.
+5. Move to Phase 3: SQLite listing database, durable deduplication, and notifications.
 
 ## Why Phase 1.5 Before Phase 2
 

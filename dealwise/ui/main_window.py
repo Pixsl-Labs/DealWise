@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import webbrowser
 from datetime import datetime
 
 from gi.repository import Gdk, GLib, Gtk
 
 from dealwise import APP_NAME, APP_VERSION
 from dealwise.config import ConfigManager
-from dealwise.models import SavedSearch
+from dealwise.models import MarketplaceListing, SavedSearch
 from dealwise.services.search_manager import SearchManager
 
 
@@ -35,9 +36,11 @@ class MainWindow(Gtk.ApplicationWindow):
         self._load_css()
         self._build_window()
         self._refresh_saved_searches()
+        self._refresh_live_results()
         self._refresh_runtime_stats()
 
         GLib.timeout_add_seconds(1, self._refresh_runtime_stats)
+        GLib.timeout_add_seconds(2, self._refresh_live_results)
 
     def _build_window(self) -> None:
         header = Gtk.HeaderBar()
@@ -66,7 +69,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         pages = [
             ("dashboard", "Dashboard", self._build_dashboard_page()),
-            ("live_deals", "Live Deals", self._placeholder_page("Live Deals")),
+            ("live_deals", "Live Deals", self._build_live_deals_page()),
             ("saved_searches", "Saved Searches", self._build_saved_searches_page()),
             ("watchlist", "Watchlist", self._placeholder_page("Watchlist")),
             ("price_history", "Price History", self._placeholder_page("Price History")),
@@ -97,15 +100,13 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_dashboard_page(self) -> Gtk.Widget:
         page = self._page_container()
 
-        heading = self._heading("Dashboard")
-        page.append(heading)
-
-        description = self._muted_label(
-            "DealWise is running locally. Marketplace connectors will be added "
-            "after the GUI, saved-search storage, logging, and refresh scheduler "
-            "are stable."
+        page.append(self._heading("Dashboard"))
+        page.append(
+            self._muted_label(
+                "DealWise is running locally with the Phase 2 marketplace connector "
+                "layer enabled. Vinted public search is available for saved searches."
+            )
         )
-        page.append(description)
 
         card_grid = Gtk.Grid()
         card_grid.set_row_spacing(14)
@@ -116,10 +117,12 @@ class MainWindow(Gtk.ApplicationWindow):
         stats = [
             ("saved_searches", "Saved Searches"),
             ("searches_running", "Searches Running"),
+            ("live_results", "Live Results"),
             ("listings_analysed", "Listings Analysed"),
             ("refreshes_completed", "Refreshes Completed"),
             ("running_since", "Running Since"),
             ("last_refresh", "Last Refresh"),
+            ("connector_status", "Connector Status"),
         ]
 
         for index, (key, title) in enumerate(stats):
@@ -127,17 +130,62 @@ class MainWindow(Gtk.ApplicationWindow):
             card_grid.attach(card, index % 3, index // 3, 1, 1)
 
         section = self._section_card(
-            "Phase 1 Status",
+            "Phase 2 Status",
             [
-                "GTK4 desktop shell is active.",
-                "Sidebar navigation is wired.",
-                "Saved searches persist under ~/.config/Pixsl-Labs/DealWise/.",
-                "Background refresh scheduler is running.",
-                "Marketplace scraping is intentionally not implemented yet.",
+                "Marketplace connector interface is active.",
+                "Vinted public search connector is available.",
+                "Live Deals displays in-memory search results.",
+                "Duplicate live results are suppressed during the current session.",
+                "SQLite persistence, notifications, and durable deduplication are reserved for Phase 3.",
             ],
         )
         section.set_margin_top(18)
         page.append(section)
+
+        return self._scroll(page)
+
+    def _build_live_deals_page(self) -> Gtk.Widget:
+        page = self._page_container()
+
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        top_row.set_hexpand(True)
+
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        title_box.set_hexpand(True)
+        title_box.append(self._heading("Live Deals"))
+        title_box.append(
+            self._muted_label(
+                "Results from public marketplace connectors appear here. "
+                "Phase 2 keeps these in memory; Phase 3 will persist them in SQLite."
+            )
+        )
+
+        refresh_button = Gtk.Button(label="Search Now")
+        refresh_button.connect("clicked", self._on_manual_refresh_clicked)
+
+        top_row.append(title_box)
+        top_row.append(refresh_button)
+        page.append(top_row)
+
+        status_card = Gtk.Frame()
+        status_card.add_css_class("card")
+        status_card.set_margin_top(18)
+
+        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        status_box.set_margin_top(12)
+        status_box.set_margin_bottom(12)
+        status_box.set_margin_start(12)
+        status_box.set_margin_end(12)
+
+        self.live_status_label = self._muted_label("Waiting for saved searches...")
+        status_box.append(self.live_status_label)
+        status_card.set_child(status_box)
+        page.append(status_card)
+
+        self.live_deals_list = Gtk.ListBox()
+        self.live_deals_list.add_css_class("saved-search-list")
+        self.live_deals_list.set_margin_top(16)
+        page.append(self.live_deals_list)
 
         return self._scroll(page)
 
@@ -147,8 +195,8 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("Saved Searches"))
         page.append(
             self._muted_label(
-                "Create searches now. Phase 2 will connect these saved searches "
-                "to marketplace plugins such as Vinted."
+                "Create searches here. Vinted searches can now run through the "
+                "Phase 2 public marketplace connector."
             )
         )
 
@@ -235,6 +283,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("Settings"))
 
         config = self.config_manager.load_config()
+        connector_names = ", ".join(self.search_manager.marketplace_registry.names())
 
         settings_card = self._section_card(
             "Current Local Settings",
@@ -242,6 +291,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 f"Theme: {config.get('theme', 'dark')}",
                 f"Default refresh: {config.get('default_refresh_interval_minutes', 5)} minutes",
                 f"Notifications enabled: {config.get('notifications_enabled', True)}",
+                f"Available connectors: {connector_names}",
                 f"Config path: {self.config_manager.app_dir}",
             ],
         )
@@ -258,7 +308,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Runtime Logs",
                 [
                     f"Log file: {self.config_manager.logs_dir / 'dealwise.log'}",
-                    "Logs are stored outside the Git repository.",
+                    "Connector failures are logged here instead of crashing the app.",
                     "Future UI work can add a live log viewer here.",
                 ],
             )
@@ -277,7 +327,7 @@ class MainWindow(Gtk.ApplicationWindow):
                     "Linux-first marketplace intelligence desktop app.",
                     "Built for hardware deal tracking, price analysis, and scam detection.",
                     "Designed as a flagship Pixsl-Labs desktop application.",
-                    "Current version focuses on clean foundations before marketplace scraping.",
+                    "Current version adds Phase 2 public marketplace search foundations.",
                 ],
             )
         )
@@ -361,20 +411,21 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_runtime_stats()
 
     def _on_manual_refresh_clicked(self, _button: Gtk.Button) -> None:
-        refreshed_count = self.search_manager.refresh_all_saved_searches()
-        self.logger.info("Manual refresh completed | searches=%s", refreshed_count)
+        started_count = self.search_manager.refresh_all_saved_searches()
+        self.logger.info("Manual refresh requested | started=%s", started_count)
         self._refresh_runtime_stats()
+
+    def _on_open_listing_clicked(self, _button: Gtk.Button, url: str) -> None:
+        if not url:
+            return
+
+        webbrowser.open(url)
 
     def _refresh_saved_searches(self) -> None:
         if not hasattr(self, "saved_search_list"):
             return
 
-        child = self.saved_search_list.get_first_child()
-
-        while child is not None:
-            next_child = child.get_next_sibling()
-            self.saved_search_list.remove(child)
-            child = next_child
+        self._clear_listbox(self.saved_search_list)
 
         searches = self.config_manager.load_saved_searches()
 
@@ -390,14 +441,44 @@ class MainWindow(Gtk.ApplicationWindow):
         for search in searches:
             self.saved_search_list.append(self._saved_search_row(search))
 
+    def _refresh_live_results(self) -> bool:
+        if not hasattr(self, "live_deals_list"):
+            return True
+
+        self._clear_listbox(self.live_deals_list)
+
+        results = self.search_manager.get_live_results(limit=100)
+        stats = self.search_manager.get_stats()
+
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text(stats.connector_status)
+
+        if not results:
+            empty_row = Gtk.ListBoxRow()
+            empty_row.set_selectable(False)
+            empty_row.set_child(
+                self._muted_label(
+                    "No live results yet. Add a Vinted saved search, then click Search Now."
+                )
+            )
+            self.live_deals_list.append(empty_row)
+            return True
+
+        for listing in results:
+            self.live_deals_list.append(self._listing_row(listing))
+
+        return True
+
     def _refresh_runtime_stats(self) -> bool:
         stats = self.search_manager.get_stats()
 
         values = {
             "saved_searches": str(stats.saved_searches),
             "searches_running": str(stats.searches_running),
+            "live_results": str(stats.live_results),
             "listings_analysed": str(stats.listings_analysed),
             "refreshes_completed": str(stats.refreshes_completed),
+            "connector_status": stats.connector_status,
             "running_since": self._format_datetime(stats.running_since),
             "last_refresh": self._format_datetime(stats.last_refresh_at),
         }
@@ -447,6 +528,55 @@ class MainWindow(Gtk.ApplicationWindow):
         row.set_child(wrapper)
         return row
 
+    def _listing_row(self, listing: MarketplaceListing) -> Gtk.ListBoxRow:
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        wrapper.set_margin_top(12)
+        wrapper.set_margin_bottom(12)
+        wrapper.set_margin_start(12)
+        wrapper.set_margin_end(12)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        details.set_hexpand(True)
+
+        title = Gtk.Label(label=listing.title, xalign=0)
+        title.add_css_class("row-title")
+        title.set_wrap(True)
+
+        meta_parts = [
+            listing.marketplace,
+            listing.price_label(),
+        ]
+
+        if listing.seller_name:
+            meta_parts.append(f"Seller: {listing.seller_name}")
+
+        if listing.source_query:
+            meta_parts.append(f"Search: {listing.source_query}")
+
+        meta = Gtk.Label(label=" • ".join(meta_parts), xalign=0)
+        meta.add_css_class("muted")
+        meta.set_wrap(True)
+
+        url_label = Gtk.Label(label=listing.url, xalign=0)
+        url_label.add_css_class("muted")
+        url_label.set_wrap(True)
+
+        details.append(title)
+        details.append(meta)
+        details.append(url_label)
+
+        open_button = Gtk.Button(label="Open")
+        open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
+
+        wrapper.append(details)
+        wrapper.append(open_button)
+
+        row.set_child(wrapper)
+        return row
+
     def _stat_card(self, key: str, title: str) -> Gtk.Widget:
         frame = Gtk.Frame()
         frame.add_css_class("card")
@@ -463,6 +593,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         value_label = Gtk.Label(label="0", xalign=0)
         value_label.add_css_class("stat-value")
+        value_label.set_wrap(True)
         self.stat_labels[key] = value_label
 
         box.append(title_label)
@@ -502,6 +633,14 @@ class MainWindow(Gtk.ApplicationWindow):
 
         row.set_child(label)
         return row
+
+    def _clear_listbox(self, listbox: Gtk.ListBox) -> None:
+        child = listbox.get_first_child()
+
+        while child is not None:
+            next_child = child.get_next_sibling()
+            listbox.remove(child)
+            child = next_child
 
     def _page_container(self) -> Gtk.Box:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -613,7 +752,7 @@ class MainWindow(Gtk.ApplicationWindow):
         }
 
         .stat-value {
-            font-size: 26px;
+            font-size: 18px;
             font-weight: 700;
             color: #ffffff;
         }
