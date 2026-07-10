@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import webbrowser
 from urllib.parse import quote_plus
 from datetime import datetime
@@ -41,7 +42,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.listing_intelligence_service = listing_intelligence_service
 
         self.set_title(APP_NAME)
-        self.set_icon_name("dealwise")
+        self._configure_app_icon()
         self.set_default_size(1280, 780)
 
         self.stat_labels: dict[str, Gtk.Label] = {}
@@ -58,6 +59,16 @@ class MainWindow(Gtk.ApplicationWindow):
         GLib.timeout_add_seconds(1, self._refresh_runtime_stats)
         GLib.timeout_add_seconds(2, self._refresh_live_results)
         GLib.timeout_add_seconds(5, self._refresh_persistent_listings)
+
+    def _configure_app_icon(self) -> None:
+        icon_dir = Path(__file__).resolve().parents[2] / "assets" / "icon"
+        display = Gdk.Display.get_default()
+
+        if display is not None and icon_dir.exists():
+            icon_theme = Gtk.IconTheme.get_for_display(display)
+            icon_theme.add_search_path(str(icon_dir))
+
+        self.set_icon_name("dealwise")
 
     def _build_window(self) -> None:
         header = Gtk.HeaderBar()
