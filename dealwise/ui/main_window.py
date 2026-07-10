@@ -36,6 +36,157 @@ LIVE_PRIORITY_OPTIONS = [
     "Full PCs first",
 ]
 
+LIVE_PRODUCT_FILTERS = {
+    "All Parts": [
+        "Any Product",
+    ],
+    "CPU": [
+        "Any CPU",
+        "Ryzen 5 7600",
+        "Ryzen 7 7700",
+        "Ryzen 7 7800X3D",
+        "Ryzen 9 7900",
+        "Ryzen 9 7900X",
+        "Intel i5-12600K",
+        "Intel i5-13600K",
+        "Intel i7-13700K",
+    ],
+    "GPU": [
+        "Any GPU",
+        "RX 6600",
+        "RX 6700 XT",
+        "RX 6800",
+        "RX 7700 XT",
+        "RX 7800 XT",
+        "RX 7900 XT",
+        "RTX 3060",
+        "RTX 4070",
+        "RTX 4070 Ti",
+        "RTX 4080",
+    ],
+    "Motherboard": [
+        "Any Motherboard",
+        "B650",
+        "B650M",
+        "B650E",
+        "X670",
+        "X670E",
+        "B550",
+        "B760 DDR5",
+        "Z790 DDR5",
+    ],
+    "RAM": [
+        "Any RAM",
+        "32GB DDR5",
+        "64GB DDR5",
+        "32GB DDR4",
+        "16GB DDR5",
+    ],
+    "Storage": [
+        "Any Storage",
+        "1TB NVMe",
+        "2TB NVMe",
+        "4TB NVMe",
+        "Samsung 990 Pro",
+        "Lexar NM790",
+        "WD SN850X",
+    ],
+    "PSU": [
+        "Any PSU",
+        "650W Gold",
+        "750W Gold",
+        "850W Gold",
+        "1000W Gold",
+    ],
+    "Case": [
+        "Any Case",
+        "ATX airflow case",
+        "mATX airflow case",
+        "Corsair 4000D",
+        "Fractal airflow case",
+    ],
+    "Cooling": [
+        "Any Cooling",
+        "Thermalright air cooler",
+        "Noctua air cooler",
+        "240mm AIO",
+        "360mm AIO",
+    ],
+    "Full PC": [
+        "Any Full PC",
+        "AM5 full PC",
+        "Gaming PC",
+        "Workstation PC",
+        "Ryzen full PC",
+    ],
+    "Unknown": [
+        "Any Product",
+    ],
+}
+
+LIVE_PRODUCT_RULES = {
+    "Ryzen 5 7600": {"all": ["ryzen", "7600"], "exclude": ["laptop", "notebook"]},
+    "Ryzen 7 7700": {"all": ["ryzen", "7700"], "exclude": ["laptop", "notebook"]},
+    "Ryzen 7 7800X3D": {"any": ["7800x3d", "7800 x3d"], "exclude": ["laptop", "notebook"]},
+    "Ryzen 9 7900": {"all": ["ryzen", "7900"], "exclude": ["7900x", "laptop", "notebook"]},
+    "Ryzen 9 7900X": {"all": ["ryzen", "7900x"], "exclude": ["laptop", "notebook"]},
+    "Intel i5-12600K": {"all": ["12600k"], "exclude": ["laptop", "notebook"]},
+    "Intel i5-13600K": {"all": ["13600k"], "exclude": ["laptop", "notebook"]},
+    "Intel i7-13700K": {"all": ["13700k"], "exclude": ["laptop", "notebook"]},
+
+    "RX 6600": {"all": ["rx", "6600"], "exclude": ["laptop", "notebook"]},
+    "RX 6700 XT": {"all": ["6700", "xt"], "exclude": ["laptop", "notebook"]},
+    "RX 6800": {"all": ["rx", "6800"], "exclude": ["laptop", "notebook"]},
+    "RX 7700 XT": {"all": ["7700", "xt"], "exclude": ["laptop", "notebook"]},
+    "RX 7800 XT": {"all": ["7800", "xt"], "exclude": ["laptop", "notebook"]},
+    "RX 7900 XT": {"all": ["7900", "xt"], "exclude": ["laptop", "notebook"]},
+    "RTX 3060": {"all": ["rtx", "3060"], "exclude": ["laptop", "notebook"]},
+    "RTX 4070": {"all": ["rtx", "4070"], "exclude": ["4070 ti", "laptop", "notebook"]},
+    "RTX 4070 Ti": {"all": ["4070", "ti"], "exclude": ["laptop", "notebook"]},
+    "RTX 4080": {"all": ["rtx", "4080"], "exclude": ["laptop", "notebook"]},
+
+    "B650": {"any": ["b650"], "exclude": ["b550", "laptop", "notebook"]},
+    "B650M": {"all": ["b650m"], "exclude": ["laptop", "notebook"]},
+    "B650E": {"all": ["b650e"], "exclude": ["laptop", "notebook"]},
+    "X670": {"any": ["x670"], "exclude": ["x670e", "laptop", "notebook"]},
+    "X670E": {"all": ["x670e"], "exclude": ["laptop", "notebook"]},
+    "B550": {"any": ["b550"], "exclude": ["laptop", "notebook"]},
+    "B760 DDR5": {"all": ["b760", "ddr5"], "exclude": ["laptop", "notebook"]},
+    "Z790 DDR5": {"all": ["z790", "ddr5"], "exclude": ["laptop", "notebook"]},
+
+    "32GB DDR5": {"all": ["32", "ddr5"], "exclude": ["laptop", "sodimm", "notebook"]},
+    "64GB DDR5": {"all": ["64", "ddr5"], "exclude": ["laptop", "sodimm", "notebook"]},
+    "32GB DDR4": {"all": ["32", "ddr4"], "exclude": ["laptop", "sodimm", "notebook"]},
+    "16GB DDR5": {"all": ["16", "ddr5"], "exclude": ["laptop", "sodimm", "notebook"]},
+
+    "1TB NVMe": {"all": ["1tb", "nvme"], "exclude": ["enclosure", "caddy", "external", "sata", "2.5", "hdd", "laptop"]},
+    "2TB NVMe": {"all": ["2tb", "nvme"], "exclude": ["enclosure", "caddy", "external", "sata", "2.5", "hdd", "laptop"]},
+    "4TB NVMe": {"all": ["4tb", "nvme"], "exclude": ["enclosure", "caddy", "external", "sata", "2.5", "hdd", "laptop"]},
+    "Samsung 990 Pro": {"all": ["990", "pro"], "exclude": ["enclosure", "external", "sata", "2.5", "laptop"]},
+    "Lexar NM790": {"all": ["nm790"], "exclude": ["enclosure", "external", "sata", "2.5", "laptop"]},
+    "WD SN850X": {"any": ["sn850x", "sn850"], "exclude": ["enclosure", "external", "sata", "2.5", "laptop"]},
+
+    "650W Gold": {"all": ["650w"], "any": ["gold", "80+"], "exclude": ["laptop"]},
+    "750W Gold": {"all": ["750w"], "any": ["gold", "80+"], "exclude": ["laptop"]},
+    "850W Gold": {"all": ["850w"], "any": ["gold", "80+"], "exclude": ["laptop"]},
+    "1000W Gold": {"all": ["1000w"], "any": ["gold", "80+"], "exclude": ["laptop"]},
+
+    "ATX airflow case": {"all": ["case"], "any": ["atx", "airflow"], "exclude": ["laptop"]},
+    "mATX airflow case": {"all": ["case"], "any": ["matx", "m-atx", "micro atx", "airflow"], "exclude": ["laptop"]},
+    "Corsair 4000D": {"all": ["4000d"], "exclude": ["laptop"]},
+    "Fractal airflow case": {"all": ["fractal"], "any": ["case", "airflow"], "exclude": ["laptop"]},
+
+    "Thermalright air cooler": {"all": ["thermalright"], "any": ["cooler", "heatsink"], "exclude": ["laptop"]},
+    "Noctua air cooler": {"all": ["noctua"], "any": ["cooler", "heatsink"], "exclude": ["laptop"]},
+    "240mm AIO": {"all": ["240"], "any": ["aio", "liquid"], "exclude": ["laptop"]},
+    "360mm AIO": {"all": ["360"], "any": ["aio", "liquid"], "exclude": ["laptop"]},
+
+    "AM5 full PC": {"all": ["pc"], "any": ["am5", "ryzen 7000", "b650"], "exclude": ["laptop", "notebook"]},
+    "Gaming PC": {"all": ["gaming", "pc"], "exclude": ["laptop", "notebook"]},
+    "Workstation PC": {"any": ["workstation", "precision"], "exclude": ["laptop", "notebook"]},
+    "Ryzen full PC": {"all": ["ryzen"], "any": ["pc", "tower", "desktop"], "exclude": ["laptop", "notebook"]},
+}
+
 
 class MainWindow(Gtk.ApplicationWindow):
     """Main DealWise desktop window."""
@@ -436,6 +587,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_part_dropdown = Gtk.DropDown.new_from_strings(
             ["All Parts", "Full PC", "CPU", "GPU", "Motherboard", "RAM", "Storage", "PSU", "Case", "Cooling", "Unknown"]
         )
+        self.live_part_dropdown.connect("notify::selected", self._on_live_part_filter_changed)
+
+        self.live_product_dropdown = Gtk.DropDown.new_from_strings(LIVE_PRODUCT_FILTERS["All Parts"])
 
         self.live_priority_dropdown = Gtk.DropDown.new_from_strings(LIVE_PRIORITY_OPTIONS)
         self.live_priority_dropdown.set_selected(1)
@@ -471,14 +625,16 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.attach(self.live_focus_dropdown, 1, 1, 1, 1)
         filter_grid.attach(self._form_label("Part"), 2, 1, 1, 1)
         filter_grid.attach(self.live_part_dropdown, 3, 1, 1, 1)
-        filter_grid.attach(self._form_label("Show First"), 0, 2, 1, 1)
-        filter_grid.attach(self.live_priority_dropdown, 1, 2, 1, 1)
-        filter_grid.attach(self._form_label("Sort"), 2, 2, 1, 1)
-        filter_grid.attach(self.live_sort_dropdown, 3, 2, 1, 1)
-        filter_grid.attach(self._form_label("Max Price"), 0, 3, 1, 1)
-        filter_grid.attach(self.live_max_price_input, 1, 3, 1, 1)
-        filter_grid.attach(self.live_hide_high_scam_check, 2, 3, 1, 1)
-        filter_grid.attach(apply_filters_button, 3, 3, 1, 1)
+        filter_grid.attach(self._form_label("Product"), 0, 2, 1, 1)
+        filter_grid.attach(self.live_product_dropdown, 1, 2, 1, 1)
+        filter_grid.attach(self._form_label("Show First"), 2, 2, 1, 1)
+        filter_grid.attach(self.live_priority_dropdown, 3, 2, 1, 1)
+        filter_grid.attach(self._form_label("Sort"), 0, 3, 1, 1)
+        filter_grid.attach(self.live_sort_dropdown, 1, 3, 1, 1)
+        filter_grid.attach(self._form_label("Max Price"), 2, 3, 1, 1)
+        filter_grid.attach(self.live_max_price_input, 3, 3, 1, 1)
+        filter_grid.attach(self.live_hide_high_scam_check, 1, 4, 1, 1)
+        filter_grid.attach(apply_filters_button, 2, 4, 1, 1)
         filter_grid.attach(clear_filters_button, 3, 4, 1, 1)
 
         filter_card.set_child(filter_grid)
@@ -1784,6 +1940,16 @@ class MainWindow(Gtk.ApplicationWindow):
         self.image_cache.fetch_async(image_url, apply_image)
         return frame
 
+    def _on_live_part_filter_changed(self, *_args) -> None:
+        if not hasattr(self, "live_product_dropdown"):
+            return
+
+        part = self._dropdown_text(self.live_part_dropdown)
+        options = LIVE_PRODUCT_FILTERS.get(part, LIVE_PRODUCT_FILTERS["All Parts"])
+
+        self.live_product_dropdown.set_model(Gtk.StringList.new(options))
+        self.live_product_dropdown.set_selected(0)
+
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
@@ -1797,6 +1963,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if hasattr(self, "live_part_dropdown"):
             self.live_part_dropdown.set_selected(0)
+
+        if hasattr(self, "live_product_dropdown"):
+            self.live_product_dropdown.set_model(Gtk.StringList.new(LIVE_PRODUCT_FILTERS["All Parts"]))
+            self.live_product_dropdown.set_selected(0)
 
         if hasattr(self, "live_priority_dropdown"):
             self.live_priority_dropdown.set_selected(1)
@@ -1987,6 +2157,16 @@ class MainWindow(Gtk.ApplicationWindow):
         # through the Apply Filters button to reduce janky rebuilds.
         return
 
+    def _on_live_part_filter_changed(self, *_args) -> None:
+        if not hasattr(self, "live_product_dropdown"):
+            return
+
+        part = self._dropdown_text(self.live_part_dropdown)
+        options = LIVE_PRODUCT_FILTERS.get(part, LIVE_PRODUCT_FILTERS["All Parts"])
+
+        self.live_product_dropdown.set_model(Gtk.StringList.new(options))
+        self.live_product_dropdown.set_selected(0)
+
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
@@ -2000,6 +2180,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if hasattr(self, "live_part_dropdown"):
             self.live_part_dropdown.set_selected(0)
+
+        if hasattr(self, "live_product_dropdown"):
+            self.live_product_dropdown.set_model(Gtk.StringList.new(LIVE_PRODUCT_FILTERS["All Parts"]))
+            self.live_product_dropdown.set_selected(0)
 
         if hasattr(self, "live_priority_dropdown"):
             self.live_priority_dropdown.set_selected(1)
@@ -2015,6 +2199,41 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
+
+    def _current_product_filter(self) -> str:
+        if hasattr(self, "live_product_dropdown"):
+            return self._dropdown_text(self.live_product_dropdown)
+
+        return "Any Product"
+
+    def _listing_matches_product_filter(self, title: str) -> bool:
+        product_filter = self._current_product_filter()
+
+        if product_filter.startswith("Any "):
+            return True
+
+        rules = LIVE_PRODUCT_RULES.get(product_filter)
+
+        if not rules:
+            return True
+
+        lower = title.lower()
+
+        for blocked in rules.get("exclude", []):
+            if blocked.lower() in lower:
+                return False
+
+        all_terms = [term.lower() for term in rules.get("all", [])]
+
+        if all_terms and not all(term in lower for term in all_terms):
+            return False
+
+        any_terms = [term.lower() for term in rules.get("any", [])]
+
+        if any_terms and not any(term in lower for term in any_terms):
+            return False
+
+        return True
 
     def _filter_stored_live_results(self, listings: list[StoredListing]) -> list[StoredListing]:
         search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""
@@ -2039,6 +2258,9 @@ class MainWindow(Gtk.ApplicationWindow):
                 continue
 
             if part_filter != "All Parts" and inferred_part != part_filter:
+                continue
+
+            if not self._listing_matches_product_filter(listing.title):
                 continue
 
             if max_price > 0 and listing.price is not None and listing.price > max_price:
@@ -2080,6 +2302,9 @@ class MainWindow(Gtk.ApplicationWindow):
                 continue
 
             if part_filter != "All Parts" and inferred_part != part_filter:
+                continue
+
+            if not self._listing_matches_product_filter(listing.title):
                 continue
 
             if max_price > 0 and listing.price is not None and listing.price > max_price:
@@ -2145,6 +2370,7 @@ class MainWindow(Gtk.ApplicationWindow):
         for attr in [
             "live_focus_dropdown",
             "live_part_dropdown",
+            "live_product_dropdown",
             "live_priority_dropdown",
             "live_sort_dropdown",
         ]:
