@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.4.0] - 2026-07-10
+
+### Added
+
+- Phase 4 deal/scam scoring foundation in Live Deals.
+- Phase 5 image-check foundation using marketplace listing image URLs.
+- Build path-aware part compatibility catalog.
+- Use Case dropdown.
+- Build Path dropdown.
+- Expandable target build notes.
+- Apply Recommendations action.
+- Search Needed Parts action.
+- Compatible part dropdowns in the parts checklist.
+- Collapsible Saved / Favourited Deals section.
+- Collapsible New / Worth Checking section.
+- Listing thumbnails where image URLs are available.
+- Favourite saved-listing status.
+- Named desktop icon install support.
+
+### Changed
+
+- Live Deals now prioritises listings that match the current parts checklist.
+- PC Builder is clearer and more decision-led.
+- Desktop launcher now uses Icon=dealwise for better Linux icon-theme behaviour.
+
+### Notes
+
+- README intentionally not changed.
+- Compatibility rules are a static local foundation, not a full compatibility database yet.
+- Reverse image search is still manual image-check foundation only.
+
 ## [0.3.2] - 2026-07-10
 
 ### Added

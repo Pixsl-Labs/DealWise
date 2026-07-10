@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import webbrowser
+from urllib.parse import quote_plus
 from datetime import datetime
 
 from gi.repository import Gdk, GLib, Gtk
@@ -13,6 +14,8 @@ from dealwise.repositories.listing_repository import ListingRepository, StoredLi
 from dealwise.services.listing_intelligence import ListingIntelligenceService
 from dealwise.services.pc_builder_service import PCBuilderService
 from dealwise.services.search_manager import SearchManager
+from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
+from dealwise.services.image_cache import ImageCacheService
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -42,6 +45,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_default_size(1280, 780)
 
         self.stat_labels: dict[str, Gtk.Label] = {}
+        self.image_cache = ImageCacheService(self.config_manager.cache_dir / "listing-images")
 
         self._load_css()
         self._build_window()
@@ -157,19 +161,34 @@ class MainWindow(Gtk.ApplicationWindow):
     def _build_pc_builder_page(self) -> Gtk.Widget:
         page = self._page_container()
         page.append(self._heading("PC Builder"))
+        page.append(
+            self._muted_label(
+                "Build-path aware upgrade planner. Pick a path, apply recommendations, then search needed parts."
+            )
+        )
 
         top_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+
         import_button = Gtk.Button(label="Import Current PC")
         import_button.connect("clicked", self._on_import_pc_clicked)
 
         clear_pc_button = Gtk.Button(label="Clear Saved PC")
         clear_pc_button.connect("clicked", self._on_clear_current_pc_clicked)
 
+        apply_button = Gtk.Button(label="Apply Recommendations")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", self._on_apply_recommendations_clicked)
+
+        search_parts_button = Gtk.Button(label="Search Needed Parts")
+        search_parts_button.connect("clicked", self._on_search_needed_parts_clicked)
+
         save_target_button = Gtk.Button(label="Save Target Build")
         save_target_button.connect("clicked", self._on_save_target_build_clicked)
 
         top_actions.append(import_button)
         top_actions.append(clear_pc_button)
+        top_actions.append(apply_button)
+        top_actions.append(search_parts_button)
         top_actions.append(save_target_button)
         page.append(top_actions)
 
@@ -178,6 +197,10 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self.pc_summary_box)
 
         target = self.pc_builder_service.get_target_build()
+
+        target_expander = Gtk.Expander(label="Target Build Controls")
+        target_expander.set_expanded(True)
+        target_expander.set_margin_top(18)
 
         target_card = Gtk.Frame()
         target_card.add_css_class("card")
@@ -192,29 +215,54 @@ class MainWindow(Gtk.ApplicationWindow):
         self.target_budget_input = Gtk.SpinButton.new_with_range(0, 100000, 10)
         self.target_budget_input.set_value(target.total_budget)
 
-        self.target_use_case_entry = Gtk.Entry()
-        self.target_use_case_entry.set_text(target.use_case)
+        self.target_use_case_dropdown = Gtk.DropDown.new_from_strings(USE_CASE_OPTIONS)
+        self._set_dropdown_by_value(self.target_use_case_dropdown, target.use_case)
+        self.target_use_case_dropdown.connect("notify::selected", self._on_target_selection_changed)
 
-        self.target_platform_entry = Gtk.Entry()
-        self.target_platform_entry.set_text(target.platform)
+        self.target_platform_dropdown = Gtk.DropDown.new_from_strings(BUILD_PATH_OPTIONS)
+        self._set_dropdown_by_value(self.target_platform_dropdown, target.platform)
+        self.target_platform_dropdown.connect("notify::selected", self._on_target_selection_changed)
 
-        self.target_notes_entry = Gtk.Entry()
-        self.target_notes_entry.set_text(target.notes)
+        self.target_notes_view = Gtk.TextView()
+        self.target_notes_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.target_notes_view.set_vexpand(False)
+        self.target_notes_view.set_size_request(-1, 90)
+        self.target_notes_buffer = self.target_notes_view.get_buffer()
+        self.target_notes_buffer.set_text(target.notes)
+
+        notes_scroll = Gtk.ScrolledWindow()
+        notes_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        notes_scroll.set_child(self.target_notes_view)
+        notes_scroll.set_min_content_height(90)
+
+        notes_expander = Gtk.Expander(label="Notes")
+        notes_expander.set_expanded(False)
+        notes_expander.set_child(notes_scroll)
 
         target_form.attach(self._form_label("Total Budget"), 0, 0, 1, 1)
         target_form.attach(self.target_budget_input, 1, 0, 1, 1)
         target_form.attach(self._form_label("Use Case"), 0, 1, 1, 1)
-        target_form.attach(self.target_use_case_entry, 1, 1, 1, 1)
+        target_form.attach(self.target_use_case_dropdown, 1, 1, 1, 1)
         target_form.attach(self._form_label("Build Path"), 0, 2, 1, 1)
-        target_form.attach(self.target_platform_entry, 1, 2, 1, 1)
-        target_form.attach(self._form_label("Notes"), 0, 3, 1, 1)
-        target_form.attach(self.target_notes_entry, 1, 3, 1, 1)
+        target_form.attach(self.target_platform_dropdown, 1, 2, 1, 1)
+        target_form.attach(self._form_label("Expandable Notes"), 0, 3, 1, 1)
+        target_form.attach(notes_expander, 1, 3, 1, 1)
 
         target_card.set_child(target_form)
-        target_card.set_margin_top(18)
-        page.append(target_card)
+        target_expander.set_child(target_card)
+        page.append(target_expander)
+
+        self.compatibility_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.compatibility_box.set_margin_top(14)
+        page.append(self.compatibility_box)
 
         page.append(self._subheading("Parts Checklist"))
+        page.append(
+            self._muted_label(
+                "Part dropdowns are filtered by the selected build path. Lower options are cheaper/lower tier; further down is stronger/better."
+            )
+        )
+
         self.parts_list = Gtk.ListBox()
         self.parts_list.add_css_class("saved-search-list")
         self.parts_list.set_margin_top(10)
@@ -233,14 +281,18 @@ class MainWindow(Gtk.ApplicationWindow):
         title_box.append(self._heading("Live Deals"))
         title_box.append(
             self._muted_label(
-                "Results from marketplace connectors appear here and are now also persisted in SQLite for Phase 3."
+                "Phase 4/5 foundation: deal rows now prioritise your parts checklist, show thumbnails where available, and separate saved favourites from worth-checking results."
             )
         )
 
         refresh_button = Gtk.Button(label="Search Now")
         refresh_button.connect("clicked", self._on_manual_refresh_clicked)
 
+        search_parts_button = Gtk.Button(label="Search Needed Parts")
+        search_parts_button.connect("clicked", self._on_search_needed_parts_clicked)
+
         top_row.append(title_box)
+        top_row.append(search_parts_button)
         top_row.append(refresh_button)
         page.append(top_row)
 
@@ -259,10 +311,21 @@ class MainWindow(Gtk.ApplicationWindow):
         status_card.set_child(status_box)
         page.append(status_card)
 
-        self.live_deals_list = Gtk.ListBox()
-        self.live_deals_list.add_css_class("saved-search-list")
-        self.live_deals_list.set_margin_top(16)
-        page.append(self.live_deals_list)
+        self.saved_live_expander = Gtk.Expander(label="Saved / Favourited Deals")
+        self.saved_live_expander.set_expanded(True)
+        self.saved_live_expander.set_margin_top(16)
+        self.saved_live_list = Gtk.ListBox()
+        self.saved_live_list.add_css_class("saved-search-list")
+        self.saved_live_expander.set_child(self.saved_live_list)
+        page.append(self.saved_live_expander)
+
+        self.worth_live_expander = Gtk.Expander(label="New / Worth Checking")
+        self.worth_live_expander.set_expanded(True)
+        self.worth_live_expander.set_margin_top(16)
+        self.worth_live_list = Gtk.ListBox()
+        self.worth_live_list.add_css_class("saved-search-list")
+        self.worth_live_expander.set_child(self.worth_live_list)
+        page.append(self.worth_live_expander)
 
         return self._scroll(page)
 
@@ -740,9 +803,9 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_save_target_build_clicked(self, _button: Gtk.Button) -> None:
         self.pc_builder_service.save_target_build(
             total_budget=self.target_budget_input.get_value(),
-            use_case=self.target_use_case_entry.get_text(),
-            platform=self.target_platform_entry.get_text(),
-            notes=self.target_notes_entry.get_text(),
+            use_case=self._current_use_case(),
+            platform=self._current_build_path(),
+            notes=self._get_target_notes(),
         )
         self._refresh_pc_builder()
 
@@ -833,25 +896,36 @@ class MainWindow(Gtk.ApplicationWindow):
             self.saved_search_list.append(self._saved_search_row(search))
 
     def _refresh_live_results(self) -> bool:
-        if not hasattr(self, "live_deals_list"):
+        if not hasattr(self, "worth_live_list"):
             return True
 
-        self._clear_listbox(self.live_deals_list)
+        self._clear_listbox(self.worth_live_list)
+        self._clear_listbox(self.saved_live_list)
 
-        results = self.search_manager.get_live_results(limit=100)
         stats = self.search_manager.get_stats()
 
         if hasattr(self, "live_status_label"):
             self.live_status_label.set_text(stats.connector_status)
 
-        if not results:
-            self.live_deals_list.append(
-                self._simple_row("No live results yet. Add a Vinted saved search, then click Search Now.")
+        favourites = self.listing_repository.list_favourites(limit=25)
+
+        if not favourites:
+            self.saved_live_list.append(self._simple_row("No favourited/saved deals yet. Click Save on a live deal."))
+        else:
+            for listing in favourites:
+                self.saved_live_list.append(self._stored_listing_row(listing))
+
+        results = self.search_manager.get_live_results(limit=100)
+        worth_results = [listing for listing in results if self._listing_matches_needed_parts(listing)]
+
+        if not worth_results:
+            self.worth_live_list.append(
+                self._simple_row("No worth-checking checklist matches yet. Click Search Needed Parts from PC Builder or add saved searches.")
             )
             return True
 
-        for listing in results:
-            self.live_deals_list.append(self._listing_row(listing))
+        for listing in worth_results:
+            self.worth_live_list.append(self._listing_row(listing))
 
         return True
 
@@ -879,9 +953,15 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._clear_box(self.pc_summary_box)
 
+        if hasattr(self, "compatibility_box"):
+            self._clear_box(self.compatibility_box)
+
         current_pc = self.pc_builder_service.get_current_pc()
         target = self.pc_builder_service.get_target_build()
         parts = self.pc_builder_service.list_build_parts()
+
+        selected_use_case = self._current_use_case()
+        selected_build_path = self._current_build_path()
 
         if current_pc is None:
             self.pc_summary_box.append(
@@ -889,19 +969,19 @@ class MainWindow(Gtk.ApplicationWindow):
                     "Current PC",
                     [
                         "No current PC imported yet.",
-                        "Click Import Current PC to run inxi -Fx.",
-                        "Install inxi if needed with: sudo apt install inxi",
+                        "Click Import Current PC to copy the Linux command and paste the response back.",
+                        "DealWise will then show upgrade limits and resale estimate.",
                     ],
                 )
             )
         else:
             self.pc_summary_box.append(
                 self._section_card(
-                    "Current PC",
+                    "Current PC Snapshot",
                     [
                         f"System: {current_pc.system_model}",
-                        f"CPU: {current_pc.cpu}",
-                        f"GPU: {current_pc.gpu}",
+                        f"CPU: {self._shorten_text(current_pc.cpu, 130)}",
+                        f"GPU: {self._shorten_text(current_pc.gpu, 160)}",
                         f"Memory: {current_pc.memory}",
                         f"Storage: {current_pc.storage}",
                         f"Distro: {current_pc.distro}",
@@ -910,7 +990,6 @@ class MainWindow(Gtk.ApplicationWindow):
                 )
             )
 
-        if current_pc is not None:
             valuation = self.pc_builder_service.estimate_current_pc_value(current_pc)
             self.pc_summary_box.append(
                 self._section_card(
@@ -919,6 +998,7 @@ class MainWindow(Gtk.ApplicationWindow):
                         f"Whole PC estimate: £{valuation.whole_unit_low} - £{valuation.whole_unit_high}",
                         f"Separate parts estimate: £{valuation.separate_parts_low} - £{valuation.separate_parts_high}",
                         f"Confidence: {valuation.confidence}",
+                        "Best practical read: separate parts may earn more, but full PC is easier and faster.",
                         *valuation.notes,
                     ],
                 )
@@ -929,12 +1009,30 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Target Build Summary",
                 [
                     f"Budget: £{target.total_budget:.0f}",
-                    f"Use case: {target.use_case}",
-                    f"Build path: {target.platform}",
-                    f"Notes: {target.notes}",
+                    f"Selected use case: {selected_use_case}",
+                    f"Selected build path: {selected_build_path}",
+                    f"Saved notes: {target.notes}",
                 ],
             )
         )
+
+        if hasattr(self, "compatibility_box"):
+            self.compatibility_box.append(
+                self._section_card(
+                    "Compatibility Filter",
+                    self.pc_builder_service.compatibility_summary(selected_build_path, selected_use_case),
+                )
+            )
+
+            self.compatibility_box.append(
+                self._section_card(
+                    "Search Plan",
+                    [
+                        "Search Needed Parts will create/refresh Vinted searches for:",
+                        *[f"- {query}" for query in self.pc_builder_service.needed_part_search_queries(selected_build_path)],
+                    ],
+                )
+            )
 
         if hasattr(self, "parts_list"):
             self._clear_listbox(self.parts_list)
@@ -982,13 +1080,28 @@ class MainWindow(Gtk.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        decision = self.listing_intelligence_service.analyse(
+            title=listing.title,
+            price=listing.price,
+            url=listing.url,
+            marketplace=listing.marketplace,
+            part_type=None,
+            budget=self.pc_builder_service.get_target_build().total_budget,
+        )
+
+        expander = Gtk.Expander(label=f"{decision.decision}: {listing.title}")
+        expander.set_expanded(False)
+
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         wrapper.set_margin_top(12)
         wrapper.set_margin_bottom(12)
         wrapper.set_margin_start(12)
         wrapper.set_margin_end(12)
 
-        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        image_box = self._listing_image_widget(listing.image_url)
+        wrapper.append(image_box)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         details.set_hexpand(True)
 
         title = Gtk.Label(label=listing.title, xalign=0)
@@ -1005,13 +1118,31 @@ class MainWindow(Gtk.ApplicationWindow):
         meta.add_css_class("muted")
         meta.set_wrap(True)
 
+        scores = Gtk.Label(
+            label=(
+                f"Deal {decision.deal_score}/100 • Scam {decision.scam_risk}/10 • "
+                f"Build fit {decision.build_fit}/100 • Evidence {decision.evidence_confidence}/100"
+            ),
+            xalign=0,
+        )
+        scores.add_css_class("muted")
+        scores.set_wrap(True)
+
         url_label = Gtk.Label(label=listing.url, xalign=0)
         url_label.add_css_class("muted")
         url_label.set_wrap(True)
 
+        reason_label = Gtk.Label(label=" | ".join(decision.reasoning[:2]), xalign=0)
+        reason_label.add_css_class("muted")
+        reason_label.set_wrap(True)
+
         details.append(title)
         details.append(meta)
+        details.append(scores)
+        details.append(reason_label)
         details.append(url_label)
+
+        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
         save_button = Gtk.Button(label="Save")
         save_button.connect("clicked", self._on_save_live_listing_clicked, listing)
@@ -1019,23 +1150,43 @@ class MainWindow(Gtk.ApplicationWindow):
         open_button = Gtk.Button(label="Open")
         open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
 
+        image_button = Gtk.Button(label="Image Check")
+        image_button.connect("clicked", self._on_image_check_clicked, listing.image_url)
+
+        button_row.append(save_button)
+        button_row.append(open_button)
+        button_row.append(image_button)
+
+        details.append(button_row)
+
         wrapper.append(details)
-        wrapper.append(save_button)
-        wrapper.append(open_button)
-        row.set_child(wrapper)
+        expander.set_child(wrapper)
+
+        row.set_child(expander)
         return row
 
     def _stored_listing_row(self, listing: StoredListing) -> Gtk.ListBoxRow:
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        decision = self.listing_intelligence_service.analyse_stored_listing(
+            listing,
+            budget=self.pc_builder_service.get_target_build().total_budget,
+        )
+
+        expander = Gtk.Expander(label=f"{listing.status}: {listing.title}")
+        expander.set_expanded(False)
+
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         wrapper.set_margin_top(12)
         wrapper.set_margin_bottom(12)
         wrapper.set_margin_start(12)
         wrapper.set_margin_end(12)
 
-        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        image_box = self._listing_image_widget(listing.image_url)
+        wrapper.append(image_box)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         details.set_hexpand(True)
 
         title = Gtk.Label(label=listing.title, xalign=0)
@@ -1049,15 +1200,33 @@ class MainWindow(Gtk.ApplicationWindow):
         meta.add_css_class("muted")
         meta.set_wrap(True)
 
+        scores = Gtk.Label(
+            label=(
+                f"Decision: {decision.decision} • Deal {decision.deal_score}/100 • "
+                f"Scam {decision.scam_risk}/10 • Build fit {decision.build_fit}/100"
+            ),
+            xalign=0,
+        )
+        scores.add_css_class("muted")
+        scores.set_wrap(True)
+
         url_label = Gtk.Label(label=listing.url, xalign=0)
         url_label.add_css_class("muted")
         url_label.set_wrap(True)
 
         details.append(title)
         details.append(meta)
+        details.append(scores)
+
         if listing.notes:
             details.append(self._muted_label(f"Notes: {listing.notes}"))
+
         details.append(url_label)
+
+        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        fav_button = Gtk.Button(label="Favourite")
+        fav_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Favourite")
 
         watch_button = Gtk.Button(label="Watching")
         watch_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Watching")
@@ -1071,24 +1240,35 @@ class MainWindow(Gtk.ApplicationWindow):
         open_button = Gtk.Button(label="Open")
         open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
 
-        wrapper.append(details)
-        wrapper.append(watch_button)
-        wrapper.append(bought_button)
-        wrapper.append(avoid_button)
-        wrapper.append(open_button)
+        image_button = Gtk.Button(label="Image Check")
+        image_button.connect("clicked", self._on_image_check_clicked, listing.image_url)
 
-        row.set_child(wrapper)
+        button_row.append(fav_button)
+        button_row.append(watch_button)
+        button_row.append(bought_button)
+        button_row.append(avoid_button)
+        button_row.append(open_button)
+        button_row.append(image_button)
+
+        details.append(button_row)
+
+        wrapper.append(details)
+        expander.set_child(wrapper)
+
+        row.set_child(expander)
         return row
 
     def _build_part_row(self, part) -> Gtk.ListBoxRow:
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        wrapper.set_margin_top(10)
-        wrapper.set_margin_bottom(10)
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        wrapper.set_margin_top(12)
+        wrapper.set_margin_bottom(12)
         wrapper.set_margin_start(12)
         wrapper.set_margin_end(12)
+
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
 
         details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         details.set_hexpand(True)
@@ -1107,6 +1287,15 @@ class MainWindow(Gtk.ApplicationWindow):
         details.append(title)
         details.append(meta)
 
+        options = self.pc_builder_service.part_options(part.part_type, self._current_build_path())
+        option_names = [option.name for option in options] or [part.target or part.part_type]
+
+        target_dropdown = Gtk.DropDown.new_from_strings(option_names)
+        self._set_dropdown_by_value(target_dropdown, part.target)
+
+        use_button = Gtk.Button(label="Use Selected")
+        use_button.connect("clicked", self._on_part_target_selected_clicked, part.id, target_dropdown)
+
         needed_button = Gtk.Button(label="Needed")
         needed_button.connect("clicked", self._on_part_status_clicked, part.id, "Needed")
 
@@ -1116,13 +1305,178 @@ class MainWindow(Gtk.ApplicationWindow):
         later_button = Gtk.Button(label="Later")
         later_button.connect("clicked", self._on_part_status_clicked, part.id, "Upgrade Later")
 
-        wrapper.append(details)
-        wrapper.append(needed_button)
-        wrapper.append(bought_button)
-        wrapper.append(later_button)
+        top.append(details)
+        top.append(target_dropdown)
+        top.append(use_button)
+        top.append(needed_button)
+        top.append(bought_button)
+        top.append(later_button)
+
+        wrapper.append(top)
+
+        if options:
+            note = options[min(len(options) - 1, target_dropdown.get_selected())].compatibility_note
+            wrapper.append(self._muted_label(f"Compatibility note: {note}"))
 
         row.set_child(wrapper)
         return row
+
+    def _on_apply_recommendations_clicked(self, _button: Gtk.Button) -> None:
+        self.pc_builder_service.apply_recommended_parts(
+            build_path=self._current_build_path(),
+            use_case=self._current_use_case(),
+        )
+        self._refresh_pc_builder()
+
+    def _on_search_needed_parts_clicked(self, _button: Gtk.Button) -> None:
+        from dealwise.models import SavedSearch
+
+        build_path = self._current_build_path()
+        queries = self.pc_builder_service.needed_part_search_queries(build_path)
+        existing = {
+            search.query.lower().strip()
+            for search in self.config_manager.load_saved_searches()
+        }
+
+        added = 0
+
+        for query in queries:
+            if not query or query.lower().strip() in existing:
+                continue
+
+            search = SavedSearch.create(
+                query=query,
+                marketplace="Vinted",
+                min_price=None,
+                max_price=None,
+                condition="Any",
+                excluded_keywords=["broken", "faulty", "wanted"],
+                refresh_interval_minutes=5,
+            )
+            self.config_manager.add_saved_search(search)
+            existing.add(query.lower().strip())
+            added += 1
+
+        self._refresh_saved_searches()
+        started = self.search_manager.refresh_all_saved_searches()
+
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text(
+                f"Created {added} checklist searches. Started {started} refresh worker(s)."
+            )
+
+        self._refresh_runtime_stats()
+
+    def _on_part_target_selected_clicked(self, _button: Gtk.Button, part_id: int, dropdown: Gtk.DropDown) -> None:
+        target = self._dropdown_text(dropdown)
+        self.pc_builder_service.update_part_target(part_id, target)
+        self._refresh_pc_builder()
+
+    def _on_target_selection_changed(self, *_args) -> None:
+        self._refresh_pc_builder()
+
+    def _on_image_check_clicked(self, _button: Gtk.Button, image_url: str | None) -> None:
+        if not image_url:
+            return
+
+        # Phase 5 foundation: open the raw image URL for manual inspection.
+        # Later this can hand off to a reverse-image provider.
+        webbrowser.open(image_url)
+
+    def _listing_matches_needed_parts(self, listing: MarketplaceListing) -> bool:
+        title = listing.title.lower()
+        queries = self.pc_builder_service.needed_part_search_queries(self._current_build_path())
+
+        if not queries:
+            return True
+
+        for query in queries:
+            important_terms = [
+                term.lower()
+                for term in query.replace("/", " ").replace("-", " ").split()
+                if len(term) >= 3
+            ]
+
+            if important_terms and all(term in title for term in important_terms[:2]):
+                return True
+
+            if query.lower() in title:
+                return True
+
+        return False
+
+    def _listing_image_widget(self, image_url: str | None) -> Gtk.Widget:
+        frame = Gtk.Frame()
+        frame.add_css_class("image-card")
+        frame.set_size_request(120, 100)
+
+        placeholder = Gtk.Label(label="No image")
+        placeholder.add_css_class("muted")
+        frame.set_child(placeholder)
+
+        if not image_url:
+            return frame
+
+        picture = Gtk.Picture()
+        picture.set_size_request(120, 100)
+
+        try:
+            picture.set_content_fit(Gtk.ContentFit.COVER)
+        except AttributeError:
+            pass
+
+        frame.set_child(picture)
+
+        def apply_image(path):
+            if path is not None:
+                try:
+                    picture.set_filename(str(path))
+                except Exception:
+                    pass
+            return False
+
+        self.image_cache.fetch_async(image_url, apply_image)
+        return frame
+
+    def _current_use_case(self) -> str:
+        if hasattr(self, "target_use_case_dropdown"):
+            return self._dropdown_text(self.target_use_case_dropdown)
+
+        return self.pc_builder_service.get_target_build().use_case
+
+    def _current_build_path(self) -> str:
+        if hasattr(self, "target_platform_dropdown"):
+            return self._dropdown_text(self.target_platform_dropdown)
+
+        return self.pc_builder_service.get_target_build().platform
+
+    def _get_target_notes(self) -> str:
+        if not hasattr(self, "target_notes_buffer"):
+            return self.pc_builder_service.get_target_build().notes
+
+        start_iter, end_iter = self.target_notes_buffer.get_bounds()
+        return self.target_notes_buffer.get_text(start_iter, end_iter, False)
+
+    def _set_dropdown_by_value(self, dropdown: Gtk.DropDown, value: str) -> None:
+        model = dropdown.get_model()
+
+        if model is None:
+            return
+
+        for index in range(model.get_n_items()):
+            item = model.get_item(index)
+
+            if item is not None and item.get_string() == value:
+                dropdown.set_selected(index)
+                return
+
+        dropdown.set_selected(0)
+
+    def _shorten_text(self, text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+
+        return text[: limit - 3] + "..."
 
     def _stat_card(self, key: str, title: str) -> Gtk.Widget:
         frame = Gtk.Frame()

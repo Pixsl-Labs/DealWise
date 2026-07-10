@@ -250,6 +250,20 @@ class ListingRepository:
 
         return [StoredListing(**dict(row)) for row in rows]
 
+    def list_favourites(self, limit: int = 25) -> list[StoredListing]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM listings
+                WHERE status IN ('Watching', 'Favourite', 'Bought', 'Negotiating')
+                ORDER BY last_seen_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [StoredListing(**dict(row)) for row in rows]
+
     def update_status(self, dedupe_key: str, status: str) -> None:
         with self.database.connect() as connection:
             connection.execute(

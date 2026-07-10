@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from dealwise.data.database import DatabaseManager
+from dealwise.services.build_catalog import BuildCatalog
 
 
 @dataclass(slots=True)
@@ -58,6 +59,7 @@ class PCBuilderService:
 
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
+        self.catalog = BuildCatalog()
 
     def import_current_pc(self) -> CurrentPC:
         try:
@@ -236,6 +238,37 @@ class PCBuilderService:
                 (status, part_id),
             )
             connection.commit()
+
+    def update_part_target(self, part_id: int, target: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE build_parts SET target = ? WHERE id = ?",
+                (target, part_id),
+            )
+            connection.commit()
+
+    def apply_recommended_parts(self, build_path: str, use_case: str) -> None:
+        parts = self.list_build_parts()
+
+        with self.database.connect() as connection:
+            for part in parts:
+                recommended = self.catalog.default_target_for_part(part.part_type, build_path)
+
+                connection.execute(
+                    "UPDATE build_parts SET target = ? WHERE id = ?",
+                    (recommended, part.id),
+                )
+
+            connection.commit()
+
+    def compatibility_summary(self, build_path: str, use_case: str) -> list[str]:
+        return self.catalog.compatibility_summary(build_path, use_case)
+
+    def part_options(self, part_type: str, build_path: str):
+        return self.catalog.options_for_part(part_type, build_path)
+
+    def needed_part_search_queries(self, build_path: str) -> list[str]:
+        return self.catalog.search_queries_for_build(self.list_build_parts(), build_path)
 
     def estimate_current_pc_value(self, current_pc: CurrentPC) -> PCValuation:
         """Estimate rough resale value for the current PC.
