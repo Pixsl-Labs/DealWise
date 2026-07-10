@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.2] - 2026-07-10
+
+### Added
+
+- Updated DealWise app icon.
+- Clear Saved PC button on the PC Builder page.
+- Rough current PC resale valuation.
+- Whole-unit resale estimate.
+- Separate-parts resale estimate.
+- Valuation confidence and notes.
+
+### Changed
+
+- PC Builder current PC import flow now surfaces estimated resale value after specs are provided.
+
+### Notes
+
+- README intentionally not changed.
+- Valuation is an offline heuristic and not live marketplace pricing yet.
+
 ## [0.3.1] - 2026-07-10
 
 ### Added

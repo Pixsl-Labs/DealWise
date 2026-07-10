@@ -1008,3 +1008,43 @@ Instead of silently running system commands, DealWise opens an import window whe
 - Pasted output can be cleared.
 - Saved PC profile can be cleared.
 - PC Builder refreshes after import or clear.
+
+
+---
+
+# Phase 3 UI Update — Current PC Resale Value Gauge
+
+## Goal
+
+After the user provides current PC specs, DealWise should estimate what the system may be worth.
+
+The estimate should show two views:
+
+- Sold as one complete PC.
+- Sold as separate parts.
+
+## Why This Matters
+
+Selling the PC as one unit is simpler but usually earns less.
+
+Selling separate parts may earn more but takes longer, requires more effort, and may carry more buyer/seller risk.
+
+## Current Implementation
+
+The first implementation uses an offline heuristic based on detected CPU, GPU, RAM, storage, and system form factor.
+
+Later phases should improve this using:
+
+- Saved listing history.
+- Completed marketplace listings.
+- Similar system comparisons.
+- Local used-market trends.
+- Condition and photos.
+
+## Success Criteria
+
+- PC Builder shows a whole-unit estimate.
+- PC Builder shows a separate-parts estimate.
+- PC Builder shows confidence.
+- PC Builder explains that the estimate is rough.
+- User can clear the saved PC profile.

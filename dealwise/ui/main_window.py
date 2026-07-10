@@ -161,9 +161,15 @@ class MainWindow(Gtk.ApplicationWindow):
         top_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         import_button = Gtk.Button(label="Import Current PC")
         import_button.connect("clicked", self._on_import_pc_clicked)
+
+        clear_pc_button = Gtk.Button(label="Clear Saved PC")
+        clear_pc_button.connect("clicked", self._on_clear_current_pc_clicked)
+
         save_target_button = Gtk.Button(label="Save Target Build")
         save_target_button.connect("clicked", self._on_save_target_build_clicked)
+
         top_actions.append(import_button)
+        top_actions.append(clear_pc_button)
         top_actions.append(save_target_button)
         page.append(top_actions)
 
@@ -900,6 +906,20 @@ class MainWindow(Gtk.ApplicationWindow):
                         f"Storage: {current_pc.storage}",
                         f"Distro: {current_pc.distro}",
                         f"Upgrade notes: {current_pc.form_factor_notes}",
+                    ],
+                )
+            )
+
+        if current_pc is not None:
+            valuation = self.pc_builder_service.estimate_current_pc_value(current_pc)
+            self.pc_summary_box.append(
+                self._section_card(
+                    "Estimated Resale Value",
+                    [
+                        f"Whole PC estimate: £{valuation.whole_unit_low} - £{valuation.whole_unit_high}",
+                        f"Separate parts estimate: £{valuation.separate_parts_low} - £{valuation.separate_parts_high}",
+                        f"Confidence: {valuation.confidence}",
+                        *valuation.notes,
                     ],
                 )
             )

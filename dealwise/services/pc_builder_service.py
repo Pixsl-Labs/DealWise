@@ -43,6 +43,16 @@ class BuildPart:
     notes: str
 
 
+@dataclass(slots=True)
+class PCValuation:
+    whole_unit_low: int
+    whole_unit_high: int
+    separate_parts_low: int
+    separate_parts_high: int
+    confidence: str
+    notes: list[str]
+
+
 class PCBuilderService:
     """Stores and analyses current PC and target build information."""
 
@@ -226,6 +236,187 @@ class PCBuilderService:
                 (status, part_id),
             )
             connection.commit()
+
+    def estimate_current_pc_value(self, current_pc: CurrentPC) -> PCValuation:
+        """Estimate rough resale value for the current PC.
+
+        This is a local heuristic, not live marketplace pricing. Later DealWise
+        phases can replace this with real market data from saved listings and
+        marketplace connectors.
+        """
+
+        combined = " ".join(
+            [
+                current_pc.raw_inxi,
+                current_pc.system_model,
+                current_pc.cpu,
+                current_pc.gpu,
+                current_pc.memory,
+                current_pc.storage,
+            ]
+        ).lower()
+
+        notes: list[str] = []
+        separate_low = 0
+        separate_high = 0
+
+        cpu_low, cpu_high, cpu_note = self._estimate_cpu_value(combined)
+        gpu_low, gpu_high, gpu_note = self._estimate_gpu_value(combined)
+        ram_low, ram_high, ram_note = self._estimate_ram_value(combined)
+        storage_low, storage_high, storage_note = self._estimate_storage_value(combined)
+        base_low, base_high, base_note = self._estimate_base_system_value(combined)
+
+        for low, high, note in [
+            (cpu_low, cpu_high, cpu_note),
+            (gpu_low, gpu_high, gpu_note),
+            (ram_low, ram_high, ram_note),
+            (storage_low, storage_high, storage_note),
+            (base_low, base_high, base_note),
+        ]:
+            separate_low += low
+            separate_high += high
+            if note:
+                notes.append(note)
+
+        if "sff" in combined or "small form factor" in combined:
+            whole_multiplier_low = 0.65
+            whole_multiplier_high = 0.80
+            notes.append("SFF/OEM systems usually sell for less as a full unit because upgrade options are limited.")
+        elif "laptop" in combined or "notebook" in combined:
+            whole_multiplier_low = 0.80
+            whole_multiplier_high = 0.95
+            notes.append("Laptop-style systems are usually sold as one unit rather than parted out.")
+        else:
+            whole_multiplier_low = 0.72
+            whole_multiplier_high = 0.88
+            notes.append("Whole PC sale estimate is lower than part-out value for faster sale and buyer convenience.")
+
+        whole_low = self._round_to_nearest_5(int(separate_low * whole_multiplier_low))
+        whole_high = self._round_to_nearest_5(int(separate_high * whole_multiplier_high))
+        separate_low = self._round_to_nearest_5(separate_low)
+        separate_high = self._round_to_nearest_5(separate_high)
+
+        confidence = self._valuation_confidence(combined)
+
+        notes.append("This is a rough offline estimate. Use completed listings later for accurate pricing.")
+        notes.append("Separate part value is usually higher but takes longer and carries more selling effort.")
+
+        return PCValuation(
+            whole_unit_low=max(0, whole_low),
+            whole_unit_high=max(0, whole_high),
+            separate_parts_low=max(0, separate_low),
+            separate_parts_high=max(0, separate_high),
+            confidence=confidence,
+            notes=notes,
+        )
+
+    def _estimate_cpu_value(self, text: str) -> tuple[int, int, str]:
+        if "i7-7700" in text or "i7 7700" in text:
+            return 30, 45, "CPU estimate: Intel i7-7700 roughly valued as an older used quad-core."
+        if "i7-6700" in text or "i7 6700" in text:
+            return 25, 40, "CPU estimate: Intel i7-6700 roughly valued as an older used quad-core."
+        if "i5-7500" in text or "i5 7500" in text:
+            return 15, 30, "CPU estimate: older Intel i5 detected."
+        if "ryzen 7 7700" in text:
+            return 140, 180, "CPU estimate: Ryzen 7 7700 class detected."
+        if "ryzen 5 7600" in text:
+            return 110, 150, "CPU estimate: Ryzen 5 7600 class detected."
+        if "ryzen" in text:
+            return 60, 130, "CPU estimate: Ryzen CPU detected, exact value needs model confirmation."
+        if "intel" in text or "core" in text:
+            return 25, 80, "CPU estimate: Intel CPU detected, exact value needs model confirmation."
+        return 0, 0, "CPU estimate: no clear CPU model detected."
+
+    def _estimate_gpu_value(self, text: str) -> tuple[int, int, str]:
+        if "rx 6400" in text:
+            return 70, 95, "GPU estimate: RX 6400 low-profile class detected."
+        if "rx 6500" in text or "6500 xt" in text:
+            return 75, 105, "GPU estimate: RX 6500 XT class detected."
+        if "rx 6600" in text:
+            return 120, 155, "GPU estimate: RX 6600 class detected."
+        if "6700 xt" in text:
+            return 190, 240, "GPU estimate: RX 6700 XT class detected."
+        if "rx 6800" in text:
+            return 240, 310, "GPU estimate: RX 6800 class detected."
+        if "7700 xt" in text:
+            return 280, 350, "GPU estimate: RX 7700 XT class detected."
+        if "rtx 3050" in text:
+            return 100, 145, "GPU estimate: RTX 3050 class detected."
+        if "rtx 3060" in text:
+            return 170, 230, "GPU estimate: RTX 3060 class detected."
+        if "radeon" in text or "geforce" in text or "graphics" in text:
+            return 40, 120, "GPU estimate: dedicated graphics likely detected, exact value needs model confirmation."
+        if "intel hd" in text or "uhd graphics" in text:
+            return 0, 0, "GPU estimate: integrated graphics detected."
+        return 0, 0, "GPU estimate: no clear dedicated GPU model detected."
+
+    def _estimate_ram_value(self, text: str) -> tuple[int, int, str]:
+        capacity = self._extract_memory_capacity_gb(text)
+
+        if capacity >= 64:
+            return 80, 140, "RAM estimate: 64GB or more detected."
+        if capacity >= 32:
+            if "ddr5" in text:
+                return 65, 95, "RAM estimate: 32GB DDR5 class detected."
+            return 40, 65, "RAM estimate: 32GB DDR4/unknown class detected."
+        if capacity >= 16:
+            if "ddr5" in text:
+                return 35, 55, "RAM estimate: 16GB DDR5 class detected."
+            return 20, 35, "RAM estimate: 16GB DDR4/unknown class detected."
+        if capacity >= 8:
+            return 10, 20, "RAM estimate: 8GB class detected."
+        return 0, 0, "RAM estimate: no clear memory capacity detected."
+
+    def _estimate_storage_value(self, text: str) -> tuple[int, int, str]:
+        if "2tb" in text or "2 tb" in text:
+            return 65, 100, "Storage estimate: 2TB storage class detected."
+        if "1tb" in text or "1 tb" in text:
+            return 35, 60, "Storage estimate: 1TB storage class detected."
+        if "512gb" in text or "512 gb" in text or "500gb" in text or "500 gb" in text:
+            return 20, 35, "Storage estimate: 500GB/512GB storage class detected."
+        if "256gb" in text or "256 gb" in text:
+            return 10, 20, "Storage estimate: 256GB storage class detected."
+        if "nvme" in text or "ssd" in text:
+            return 15, 45, "Storage estimate: SSD/NVMe detected but capacity unclear."
+        return 0, 0, "Storage estimate: no clear storage capacity detected."
+
+    def _estimate_base_system_value(self, text: str) -> tuple[int, int, str]:
+        if "dell precision" in text and ("sff" in text or "small form factor" in text):
+            return 35, 60, "Base system estimate: Dell Precision SFF chassis/motherboard/PSU value added."
+        if "dell precision" in text:
+            return 45, 80, "Base system estimate: Dell Precision chassis/motherboard/PSU value added."
+        if "desktop" in text or "tower" in text:
+            return 40, 90, "Base system estimate: desktop chassis/motherboard/PSU value added."
+        return 20, 50, "Base system estimate: generic case/motherboard/PSU allowance added."
+
+    def _extract_memory_capacity_gb(self, text: str) -> int:
+        matches = re.findall(r"(\d+)\s*(?:gib|gb)", text, flags=re.IGNORECASE)
+
+        if not matches:
+            return 0
+
+        numbers = [int(match) for match in matches]
+
+        if not numbers:
+            return 0
+
+        return max(numbers)
+
+    def _valuation_confidence(self, text: str) -> str:
+        signals = 0
+
+        for term in ["i7", "i5", "ryzen", "rx ", "rtx", "gtx", "ram", "memory", "nvme", "ssd", "dell", "precision"]:
+            if term in text:
+                signals += 1
+
+        if signals >= 5:
+            return "Medium"
+        if signals >= 3:
+            return "Low-Medium"
+        return "Low"
+
+    def _round_to_nearest_5(self, value: int) -> int:
+        return int(round(value / 5) * 5)
 
     def _extract_first_match(self, text: str, patterns: list[str]) -> str:
         for pattern in patterns:
