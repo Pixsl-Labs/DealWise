@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from dealwise.repositories.listing_repository import StoredListing, infer_part_type
@@ -19,11 +20,10 @@ class ListingDecision:
 
 
 class ListingIntelligenceService:
-    """Phase 3 decision/seller-message foundation.
+    """Explainable local listing scoring.
 
-    This is deliberately simple and explainable for now. Later phases can make
-    scoring more advanced once price history, seller data, and reverse image
-    checks exist.
+    This is still not real price-history scoring, but it now varies by detected
+    part, rough UK used-market ranges, price, and risk terms.
     """
 
     def analyse(
@@ -36,41 +36,86 @@ class ListingIntelligenceService:
         budget: float | None = None,
     ) -> ListingDecision:
         safe_part_type = part_type or infer_part_type(title)
+        lower_title = title.lower()
         reasoning: list[str] = []
 
-        deal_score = 55
-        scam_risk = 3.5
-        build_fit = 65
+        expected_low, expected_high, matched_model = self._expected_price_range(lower_title, safe_part_type)
+
+        deal_score = 58
+        scam_risk = 3.0
+        build_fit = 62
         budget_fit = 60
-        evidence_confidence = 35
-        urgency_score = 40
+        evidence_confidence = 45
+        urgency_score = 42
+
+        if matched_model:
+            build_fit += 12
+            evidence_confidence += 8
+            reasoning.append(f"Detected likely model/range: {matched_model}.")
+        elif safe_part_type != "Unknown":
+            build_fit += 6
+            reasoning.append(f"Listing appears to match part type: {safe_part_type}.")
+
+        if price is None:
+            deal_score = 50
+            evidence_confidence -= 10
+            reasoning.append("No price was detected, so deal quality is uncertain.")
+        elif expected_high > 0:
+            midpoint = (expected_low + expected_high) / 2
+
+            if price <= expected_low * 0.80:
+                deal_score = 88
+                scam_risk += 1.2
+                urgency_score += 20
+                reasoning.append("Price is far below the rough expected range, so it may be a strong deal but needs caution.")
+            elif price <= expected_low:
+                deal_score = 78
+                urgency_score += 14
+                reasoning.append("Price is below the rough expected range.")
+            elif price <= midpoint:
+                deal_score = 68
+                reasoning.append("Price is around the lower half of the rough expected range.")
+            elif price <= expected_high:
+                deal_score = 58
+                reasoning.append("Price is within the rough expected range.")
+            else:
+                deal_score = 43
+                urgency_score -= 8
+                reasoning.append("Price is above the rough expected range.")
 
         if price is not None and budget and budget > 0:
             if price <= budget:
                 budget_fit = 90
-                deal_score += 10
-                reasoning.append("Price is within the allocated part budget.")
+                deal_score += 6
+                reasoning.append("Price is within the selected budget.")
+            elif price <= budget * 1.15:
+                budget_fit = 65
+                reasoning.append("Price is slightly above the selected budget.")
             else:
                 budget_fit = 35
-                deal_score -= 10
-                reasoning.append("Price is above the allocated part budget.")
+                deal_score -= 8
+                reasoning.append("Price is well above the selected budget.")
 
-        if safe_part_type != "Unknown":
-            build_fit += 10
-            reasoning.append(f"Listing appears to match part type: {safe_part_type}.")
-
-        if marketplace.lower() == "manual":
-            reasoning.append("Manual URL/listing input needs extra evidence before buying.")
-            evidence_confidence -= 5
+        high_risk_words = ["broken", "faulty", "spares", "repair", "not working", "untested", "no returns"]
+        if any(term in lower_title for term in high_risk_words):
+            scam_risk += 2.5
+            evidence_confidence -= 18
+            deal_score -= 12
+            reasoning.append("Risk wording detected in the listing title.")
 
         if not url:
             scam_risk += 1.5
+            evidence_confidence -= 10
             reasoning.append("No URL was provided, so the listing cannot be independently checked.")
 
-        if safe_part_type in {"GPU", "PSU", "AIO"}:
-            scam_risk += 1.0
-            evidence_confidence -= 10
+        if safe_part_type in {"GPU", "PSU", "Cooling"}:
+            scam_risk += 0.8
+            evidence_confidence -= 6
             reasoning.append(f"{safe_part_type} is higher risk when buying used.")
+
+        if marketplace.lower() == "manual":
+            evidence_confidence -= 5
+            reasoning.append("Manual listing input needs extra evidence before buying.")
 
         deal_score = clamp_int(deal_score, 0, 100)
         build_fit = clamp_int(build_fit, 0, 100)
@@ -117,6 +162,50 @@ class ListingIntelligenceService:
             budget=budget,
         )
 
+    def _expected_price_range(self, title: str, part_type: str) -> tuple[int, int, str]:
+        ranges = [
+            (r"rx\s*6600", 110, 150, "RX 6600"),
+            (r"rx\s*6700\s*xt", 180, 240, "RX 6700 XT"),
+            (r"rx\s*6800", 230, 310, "RX 6800"),
+            (r"rx\s*7700\s*xt", 290, 360, "RX 7700 XT"),
+            (r"rx\s*7800\s*xt", 380, 470, "RX 7800 XT"),
+            (r"rtx\s*3060", 160, 220, "RTX 3060"),
+            (r"rtx\s*4070\s*ti", 520, 680, "RTX 4070 Ti"),
+            (r"rtx\s*4070", 390, 500, "RTX 4070"),
+            (r"ryzen\s*5\s*7600", 130, 170, "Ryzen 5 7600"),
+            (r"ryzen\s*7\s*7700", 150, 200, "Ryzen 7 7700"),
+            (r"7800x3d", 270, 350, "Ryzen 7 7800X3D"),
+            (r"ryzen\s*9\s*7900x?", 250, 370, "Ryzen 9 7900/7900X"),
+            (r"i5\s*-?\s*12600k", 120, 170, "Intel i5-12600K"),
+            (r"i5\s*-?\s*13600k", 190, 260, "Intel i5-13600K"),
+            (r"i7\s*-?\s*13700k", 240, 330, "Intel i7-13700K"),
+            (r"b650", 90, 170, "B650 motherboard"),
+            (r"x670", 190, 280, "X670 motherboard"),
+            (r"32\s*gb.*ddr5|ddr5.*32\s*gb", 70, 110, "32GB DDR5 RAM"),
+            (r"64\s*gb.*ddr5|ddr5.*64\s*gb", 140, 220, "64GB DDR5 RAM"),
+            (r"2\s*tb.*nvme|nvme.*2\s*tb", 70, 115, "2TB NVMe"),
+            (r"650\s*w.*gold|650w.*gold", 55, 90, "650W Gold PSU"),
+            (r"750\s*w.*gold|750w.*gold", 75, 120, "750W Gold PSU"),
+        ]
+
+        for pattern, low, high, label in ranges:
+            if re.search(pattern, title):
+                return low, high, label
+
+        fallback = {
+            "GPU": (120, 320, "Generic GPU"),
+            "CPU": (80, 220, "Generic CPU"),
+            "Motherboard": (70, 180, "Generic motherboard"),
+            "RAM": (35, 120, "Generic RAM"),
+            "Storage": (30, 120, "Generic storage"),
+            "PSU": (40, 120, "Generic PSU"),
+            "Case": (35, 110, "Generic case"),
+            "Cooling": (20, 90, "Generic cooling"),
+        }
+
+        low, high, label = fallback.get(part_type, (0, 0, ""))
+        return low, high, label
+
     def generate_seller_message(
         self,
         title: str,
@@ -125,7 +214,6 @@ class ListingIntelligenceService:
         tone: str = "friendly",
     ) -> str:
         evidence_lines = evidence_for_part(part_type)
-
         evidence_text = "\n".join(f"- {line}" for line in evidence_lines)
 
         if decision == "NEGOTIATE":
@@ -156,16 +244,19 @@ class ListingIntelligenceService:
         if scam_risk >= 7:
             return "AVOID"
 
+        if deal_score >= 82 and budget_fit >= 70 and scam_risk <= 4:
+            return "BUY NOW"
+
+        if deal_score >= 68 and scam_risk <= 5:
+            return "WATCH"
+
         if evidence_confidence < 45:
             return "NEGOTIATE"
 
-        if deal_score >= 80 and budget_fit >= 75 and scam_risk <= 3:
-            return "BUY NOW"
+        if deal_score < 48:
+            return "WAIT"
 
-        if deal_score >= 65:
-            return "WATCH"
-
-        return "WAIT"
+        return "WATCH"
 
 
 def evidence_for_part(part_type: str) -> list[str]:

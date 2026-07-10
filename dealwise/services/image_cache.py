@@ -17,6 +17,17 @@ class ImageCacheService:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._active_urls: set[str] = set()
 
+    def cached_path_for_url(self, url: str | None) -> Path | None:
+        if not url:
+            return None
+
+        cached_path = self._path_for_url(url)
+
+        if cached_path.exists():
+            return cached_path
+
+        return None
+
     def fetch_async(self, url: str | None, callback) -> None:
         if not url:
             GLib.idle_add(callback, None)

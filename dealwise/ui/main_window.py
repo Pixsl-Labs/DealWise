@@ -19,6 +19,22 @@ from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
 
 
+HARDWARE_PREFERENCE_OPTIONS = [
+    "Best value / mixed",
+    "Linux Mint friendly AMD-first",
+    "AMD CPU + AMD GPU",
+    "AMD CPU + Nvidia GPU",
+    "Intel CPU + AMD GPU",
+    "Intel CPU + Nvidia GPU",
+]
+
+LIVE_PRIORITY_OPTIONS = [
+    "Best overall first",
+    "PC parts first",
+    "Full PCs first",
+]
+
+
 class MainWindow(Gtk.ApplicationWindow):
     """Main DealWise desktop window."""
 
@@ -227,7 +243,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("PC Builder"))
         page.append(
             self._muted_label(
-                "Clear upgrade planner with live compatibility, budget estimates, and checklist-driven marketplace searches."
+                "Clear upgrade planner with live compatibility, budget estimates, hardware preference, and checklist-driven marketplace searches."
             )
         )
 
@@ -288,6 +304,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self._set_dropdown_by_value(self.target_platform_dropdown, target.platform)
         self.target_platform_dropdown.connect("notify::selected", self._on_target_input_changed)
 
+        self.hardware_preference_dropdown = Gtk.DropDown.new_from_strings(HARDWARE_PREFERENCE_OPTIONS)
+        self.hardware_preference_dropdown.set_selected(1)
+        self.hardware_preference_dropdown.connect("notify::selected", self._on_hardware_preference_changed)
+
         self.target_notes_view = Gtk.TextView()
         self.target_notes_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.target_notes_view.set_vexpand(False)
@@ -319,8 +339,10 @@ class MainWindow(Gtk.ApplicationWindow):
         target_form.attach(self.target_use_case_dropdown, 1, 1, 1, 1)
         target_form.attach(self._form_label("Build Path"), 0, 2, 1, 1)
         target_form.attach(self.target_platform_dropdown, 1, 2, 1, 1)
-        target_form.attach(self._form_label("Notes"), 0, 3, 1, 1)
-        target_form.attach(notes_expander, 1, 3, 1, 1)
+        target_form.attach(self._form_label("Hardware Preference"), 0, 3, 1, 1)
+        target_form.attach(self.hardware_preference_dropdown, 1, 3, 1, 1)
+        target_form.attach(self._form_label("Notes"), 0, 4, 1, 1)
+        target_form.attach(notes_expander, 1, 4, 1, 1)
 
         target_card.set_child(target_form)
         target_expander.set_child(target_card)
@@ -333,7 +355,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._subheading("Parts Checklist"))
         page.append(
             self._muted_label(
-                "Dropdowns are filtered by build path. Higher entries are stronger and usually more expensive."
+                "Dropdowns are filtered by build path and hardware preference. Higher entries are stronger and usually more expensive."
             )
         )
 
@@ -355,7 +377,7 @@ class MainWindow(Gtk.ApplicationWindow):
         title_box.append(self._heading("Live Deals"))
         title_box.append(
             self._muted_label(
-                "Smooth deal cards with filtering, sorting, saved favourites, images where available, and checklist-aware matching."
+                "Smooth deal cards with manual filter apply, image caching, priority sorting, and improved deal scores."
             )
         )
 
@@ -403,12 +425,13 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_focus_dropdown = Gtk.DropDown.new_from_strings(
             ["All Live Deals", "Checklist Matches Only"]
         )
-        self.live_focus_dropdown.connect("notify::selected", self._on_live_filter_changed)
 
         self.live_part_dropdown = Gtk.DropDown.new_from_strings(
-            ["All Parts", "CPU", "GPU", "Motherboard", "RAM", "Storage", "PSU", "Case", "Cooling", "Unknown"]
+            ["All Parts", "Full PC", "CPU", "GPU", "Motherboard", "RAM", "Storage", "PSU", "Case", "Cooling", "Unknown"]
         )
-        self.live_part_dropdown.connect("notify::selected", self._on_live_filter_changed)
+
+        self.live_priority_dropdown = Gtk.DropDown.new_from_strings(LIVE_PRIORITY_OPTIONS)
+        self.live_priority_dropdown.set_selected(1)
 
         self.live_sort_dropdown = Gtk.DropDown.new_from_strings(
             [
@@ -421,24 +444,28 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Highest Evidence Confidence",
             ]
         )
-        self.live_sort_dropdown.connect("notify::selected", self._on_live_filter_changed)
 
         self.live_max_price_input = Gtk.SpinButton.new_with_range(0, 100000, 5)
         self.live_max_price_input.set_tooltip_text("0 means no max price filter")
-        self.live_max_price_input.connect("value-changed", self._on_live_filter_changed)
 
         self.live_hide_high_scam_check = Gtk.CheckButton(label="Hide high scam risk")
-        self.live_hide_high_scam_check.connect("toggled", self._on_live_filter_changed)
+
+        apply_filters_button = Gtk.Button(label="Apply Filters")
+        apply_filters_button.add_css_class("suggested-action")
+        apply_filters_button.connect("clicked", self._on_apply_live_filters_clicked)
 
         filter_grid.attach(self._form_label("Focus"), 0, 0, 1, 1)
         filter_grid.attach(self.live_focus_dropdown, 1, 0, 1, 1)
         filter_grid.attach(self._form_label("Part"), 2, 0, 1, 1)
         filter_grid.attach(self.live_part_dropdown, 3, 0, 1, 1)
-        filter_grid.attach(self._form_label("Sort"), 0, 1, 1, 1)
-        filter_grid.attach(self.live_sort_dropdown, 1, 1, 1, 1)
-        filter_grid.attach(self._form_label("Max Price"), 2, 1, 1, 1)
-        filter_grid.attach(self.live_max_price_input, 3, 1, 1, 1)
-        filter_grid.attach(self.live_hide_high_scam_check, 1, 2, 2, 1)
+        filter_grid.attach(self._form_label("Show First"), 0, 1, 1, 1)
+        filter_grid.attach(self.live_priority_dropdown, 1, 1, 1, 1)
+        filter_grid.attach(self._form_label("Sort"), 2, 1, 1, 1)
+        filter_grid.attach(self.live_sort_dropdown, 3, 1, 1, 1)
+        filter_grid.attach(self._form_label("Max Price"), 0, 2, 1, 1)
+        filter_grid.attach(self.live_max_price_input, 1, 2, 1, 1)
+        filter_grid.attach(self.live_hide_high_scam_check, 2, 2, 1, 1)
+        filter_grid.attach(apply_filters_button, 3, 2, 1, 1)
 
         filter_card.set_child(filter_grid)
         filter_expander.set_child(filter_card)
@@ -973,7 +1000,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_save_target_build_clicked(self, _button: Gtk.Button) -> None:
         self.pc_builder_service.save_target_build(
             total_budget=self._current_budget(),
-            use_case=self._current_use_case(),
+            use_case=self._effective_use_case(),
             platform=self._current_build_path(),
             notes=self._get_target_notes(),
         )
@@ -1080,7 +1107,12 @@ class MainWindow(Gtk.ApplicationWindow):
         results = self.search_manager.get_live_results(limit=150)
         filtered_results = self._filter_and_sort_live_results(results)
 
-        signature = self._live_signature(stats.connector_status, favourites, filtered_results)
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text(
+                f"{stats.connector_status} Showing {len(filtered_results)} filtered result(s)."
+            )
+
+        signature = self._live_signature("", favourites, filtered_results)
 
         if not force and signature == self._live_render_signature:
             return True
@@ -1089,11 +1121,6 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._clear_listbox(self.worth_live_list)
         self._clear_listbox(self.saved_live_list)
-
-        if hasattr(self, "live_status_label"):
-            self.live_status_label.set_text(
-                f"{stats.connector_status} Showing {len(filtered_results)} filtered result(s)."
-            )
 
         if not favourites:
             self.saved_live_list.append(
@@ -1152,6 +1179,7 @@ class MainWindow(Gtk.ApplicationWindow):
         parts = self.pc_builder_service.list_build_parts()
 
         selected_use_case = self._current_use_case()
+        selected_hardware_preference = self._current_hardware_preference()
         selected_build_path = self._current_build_path()
         selected_budget = self._current_budget()
         selected_notes = self._get_target_notes()
@@ -1211,6 +1239,7 @@ class MainWindow(Gtk.ApplicationWindow):
                     ("Budget", f"£{selected_budget:.0f}"),
                     ("Selected Use Case", selected_use_case),
                     ("Selected Build Path", selected_build_path),
+                    ("Hardware Preference", selected_hardware_preference),
                     ("Live Notes", selected_notes or "No notes added yet."),
                 ],
             )
@@ -1235,7 +1264,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.compatibility_box.append(
                 self._section_card(
                     "Compatibility Filter",
-                    self.pc_builder_service.compatibility_summary(selected_build_path, selected_use_case),
+                    self.pc_builder_service.compatibility_summary(selected_build_path, self._effective_use_case()),
                 )
             )
 
@@ -1587,7 +1616,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_apply_recommendations_clicked(self, _button: Gtk.Button) -> None:
         self.pc_builder_service.apply_recommended_parts(
             build_path=self._current_build_path(),
-            use_case=self._current_use_case(),
+            use_case=self._effective_use_case(),
         )
         self._refresh_pc_builder()
 
@@ -1688,6 +1717,16 @@ class MainWindow(Gtk.ApplicationWindow):
         except AttributeError:
             pass
 
+        cached_path = self.image_cache.cached_path_for_url(image_url)
+
+        if cached_path is not None:
+            try:
+                picture.set_filename(str(cached_path))
+                frame.set_child(picture)
+                return frame
+            except Exception:
+                pass
+
         frame.set_child(picture)
 
         def apply_image(path):
@@ -1706,6 +1745,25 @@ class MainWindow(Gtk.ApplicationWindow):
             return self._dropdown_text(self.target_use_case_dropdown)
 
         return self.pc_builder_service.get_target_build().use_case
+
+    def _current_hardware_preference(self) -> str:
+        if hasattr(self, "hardware_preference_dropdown"):
+            return self._dropdown_text(self.hardware_preference_dropdown)
+
+        return "Best value / mixed"
+
+    def _effective_use_case(self) -> str:
+        return f"{self._current_use_case()} | {self._current_hardware_preference()}"
+
+    def _on_hardware_preference_changed(self, *_args) -> None:
+        preference = self._current_hardware_preference().lower()
+
+        if "intel cpu" in preference and hasattr(self, "target_platform_dropdown"):
+            self._set_dropdown_by_value(self.target_platform_dropdown, "Intel LGA1700 / DDR5")
+        elif ("amd cpu" in preference or "linux mint" in preference) and hasattr(self, "target_platform_dropdown"):
+            self._set_dropdown_by_value(self.target_platform_dropdown, "AM5 / ATX target")
+
+        self._on_target_input_changed()
 
     def _current_build_path(self) -> str:
         if hasattr(self, "target_platform_dropdown"):
@@ -1756,20 +1814,30 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     def _on_live_filter_changed(self, *_args) -> None:
+        # Kept for backward compatibility. Filters are now applied manually
+        # through the Apply Filters button to reduce janky rebuilds.
+        return
+
+    def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
 
     def _filter_and_sort_live_results(self, results: list[MarketplaceListing]) -> list[MarketplaceListing]:
         focus = self._dropdown_text(self.live_focus_dropdown) if hasattr(self, "live_focus_dropdown") else "All Live Deals"
         part_filter = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
+        priority_mode = self._dropdown_text(self.live_priority_dropdown) if hasattr(self, "live_priority_dropdown") else "Best overall first"
         sort_mode = self._dropdown_text(self.live_sort_dropdown) if hasattr(self, "live_sort_dropdown") else "Newest First"
         max_price = self.live_max_price_input.get_value() if hasattr(self, "live_max_price_input") else 0
         hide_high_scam = self.live_hide_high_scam_check.get_active() if hasattr(self, "live_hide_high_scam_check") else False
 
-        scored: list[tuple[MarketplaceListing, object, str]] = []
+        scored: list[tuple[MarketplaceListing, object, str, bool]] = []
 
         for listing in results:
             inferred_part = infer_part_type(listing.title)
+            is_full_pc = self._is_full_pc_listing(listing.title)
+
+            if is_full_pc:
+                inferred_part = "Full PC"
 
             if focus == "Checklist Matches Only" and not self._listing_matches_needed_parts(listing):
                 continue
@@ -1792,10 +1860,10 @@ class MainWindow(Gtk.ApplicationWindow):
             if hide_high_scam and decision.scam_risk >= 6:
                 continue
 
-            scored.append((listing, decision, inferred_part))
+            scored.append((listing, decision, inferred_part, is_full_pc))
 
         def price_value(item):
-            listing, _decision, _part = item
+            listing, _decision, _part, _is_full_pc = item
             return listing.price if listing.price is not None else 999999
 
         if sort_mode == "Lowest Price":
@@ -1813,14 +1881,40 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             scored.sort(key=lambda item: item[0].found_at, reverse=True)
 
+        if priority_mode == "PC parts first":
+            scored.sort(key=lambda item: 1 if item[3] else 0)
+        elif priority_mode == "Full PCs first":
+            scored.sort(key=lambda item: 0 if item[3] else 1)
+
         return [item[0] for item in scored]
 
+    def _is_full_pc_listing(self, title: str) -> bool:
+        lower = title.lower()
+        full_pc_terms = [
+            "gaming pc",
+            "desktop pc",
+            "full pc",
+            "complete pc",
+            "computer tower",
+            "gaming computer",
+            "custom pc",
+            "prebuilt",
+            "workstation",
+            "dell precision",
+            "pc bundle",
+        ]
+
+        return any(term in lower for term in full_pc_terms)
+
     def _live_signature(self, status: str, favourites: list[StoredListing], results: list[MarketplaceListing]) -> str:
+        # Do not include connector status here. Status changes every refresh and
+        # caused full list redraws, which made thumbnails disappear/reappear.
         filter_state = []
 
         for attr in [
             "live_focus_dropdown",
             "live_part_dropdown",
+            "live_priority_dropdown",
             "live_sort_dropdown",
         ]:
             if hasattr(self, attr):
@@ -1837,7 +1931,6 @@ class MainWindow(Gtk.ApplicationWindow):
 
         return "|".join(
             [
-                status,
                 str(getattr(self, "_saved_live_expanded", True)),
                 str(getattr(self, "_worth_live_expanded", True)),
                 ",".join(filter_state),

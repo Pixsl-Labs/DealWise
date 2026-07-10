@@ -186,18 +186,30 @@ class BuildCatalog:
             return part_type
 
         use = use_case.lower()
+        part = part_type.lower()
+
+        if part == "gpu":
+            amd_options = [option for option in options if option.name.lower().startswith("rx ")]
+            nvidia_options = [option for option in options if option.name.lower().startswith("rtx ")]
+
+            if ("nvidia" in use or "rtx" in use) and nvidia_options:
+                options = nvidia_options
+            elif ("amd" in use or "linux mint" in use or "radeon" in use) and amd_options:
+                options = amd_options
 
         if "4k" in use or "premium" in use:
             index = len(options) - 1
         elif "cybersecurity" in use or "vm" in use:
-            if part_type.lower() == "ram":
+            if part == "ram":
                 index = min(len(options) - 1, 4)
-            elif part_type.lower() == "cpu":
+            elif part == "cpu":
                 index = min(len(options) - 1, 5)
             else:
                 index = min(len(options) - 1, max(0, len(options) - 2))
         elif "budget" in use:
             index = min(len(options) - 1, 1)
+        elif "linux mint" in use and part == "gpu":
+            index = min(len(options) - 1, 2)
         else:
             index = min(len(options) - 1, max(0, len(options) - 2))
 

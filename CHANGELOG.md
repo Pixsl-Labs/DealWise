@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.5] - 2026-07-10
+
+### Added
+
+- Hardware Preference selector in PC Builder.
+- Linux Mint friendly AMD-first recommendation path.
+- Live Deals Show First selector for PC parts or full PCs.
+- Apply Filters button in Live Deals.
+- Full PC detection for filtering and priority sorting.
+- More price-aware deal scoring.
+
+### Fixed
+
+- Reduced Live Deals image flicker by avoiding status-only list redraws.
+- Added instant thumbnail loading from local image cache.
+- Prevented filter controls from rebuilding the list on every small change.
+
+### Notes
+
+- README intentionally not changed.
+- Deal scores are still local rough estimates, not full price-history scoring yet.
+
 ## [0.4.4] - 2026-07-10
 
 ### Fixed
