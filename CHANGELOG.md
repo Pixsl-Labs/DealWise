@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.3] - 2026-07-10
+
+### Fixed
+
+- Fixed startup failure caused by missing PCBuilderService.estimate_build_cost.
+- Fixed Apply Recommendations so selected parts also receive sensible budgets.
+- Prevented selected build cost overview from calling a missing service method.
+
+### Notes
+
+- README intentionally not changed.
+
 ## [0.4.2] - 2026-07-10
 
 ### Added

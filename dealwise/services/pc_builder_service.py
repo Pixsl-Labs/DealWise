@@ -248,18 +248,62 @@ class PCBuilderService:
             connection.commit()
 
     def apply_recommended_parts(self, build_path: str, use_case: str) -> None:
+        """Apply compatible recommended parts and sensible budgets.
+
+        This keeps CPU, motherboard and RAM aligned to the selected build path.
+        It also prevents Storage/Cooling and other parts from staying at £0.
+        """
+
         parts = self.list_build_parts()
 
         with self.database.connect() as connection:
             for part in parts:
-                recommended = self.catalog.default_target_for_part(part.part_type, build_path)
+                recommended = self.catalog.default_target_for_part(
+                    part.part_type,
+                    build_path,
+                    use_case,
+                )
+
+                low, high = self.catalog.estimate_option_cost(
+                    part.part_type,
+                    recommended,
+                    build_path,
+                )
+
+                recommended_budget = high if high > 0 else part.budget
 
                 connection.execute(
-                    "UPDATE build_parts SET target = ? WHERE id = ?",
-                    (recommended, part.id),
+                    """
+                    UPDATE build_parts
+                    SET target = ?, budget = ?
+                    WHERE id = ?
+                    """,
+                    (recommended, recommended_budget, part.id),
                 )
 
             connection.commit()
+
+    def estimate_build_cost(self, build_path: str) -> tuple[int, int]:
+        """Return rough low/high cost for the currently selected build parts."""
+
+        low_total = 0
+        high_total = 0
+
+        for part in self.list_build_parts():
+            low, high = self.catalog.estimate_option_cost(
+                part.part_type,
+                part.target,
+                build_path,
+            )
+
+            if low == 0 and high == 0 and part.budget > 0:
+                low = int(part.budget)
+                high = int(part.budget)
+
+            low_total += low
+            high_total += high
+
+        return low_total, high_total
 
     def compatibility_summary(self, build_path: str, use_case: str) -> list[str]:
         return self.catalog.compatibility_summary(build_path, use_case)
