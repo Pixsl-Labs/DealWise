@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.4] - 2026-07-10
+
+### Fixed
+
+- Added SQLite schema migrations for older local DealWise databases.
+- Moved heavy startup refreshes to safe delayed startup so the window can appear first.
+- Added safe periodic refresh wrappers.
+- Added fatal startup logging to /tmp/dealwise_fatal.log.
+
+### Notes
+
+- README intentionally not changed.
+- Existing runtime database is preserved unless SQLite reports corruption.
+
 ## [0.4.3] - 2026-07-10
 
 ### Fixed

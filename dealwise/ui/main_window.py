@@ -52,16 +52,66 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._load_css()
         self._build_window()
-        self._refresh_saved_searches()
-        self._live_render_signature = ""
-        self._refresh_live_results(force=True)
-        self._refresh_persistent_listings()
-        self._refresh_pc_builder()
-        self._refresh_runtime_stats()
 
-        GLib.timeout_add_seconds(1, self._refresh_runtime_stats)
-        GLib.timeout_add_seconds(4, self._refresh_live_results)
-        GLib.timeout_add_seconds(5, self._refresh_persistent_listings)
+        GLib.idle_add(self._safe_initial_refresh)
+        GLib.timeout_add_seconds(1, self._safe_refresh_runtime_stats)
+        GLib.timeout_add_seconds(4, self._safe_refresh_live_results)
+        GLib.timeout_add_seconds(5, self._safe_refresh_persistent_listings)
+
+    def _safe_initial_refresh(self) -> bool:
+        """Run startup refreshes after the window has been created.
+
+        This prevents one broken refresh, old database schema, or marketplace
+        issue from stopping the main window from appearing.
+        """
+
+        refresh_steps = [
+            ("saved searches", self._refresh_saved_searches),
+            ("live results", lambda: self._refresh_live_results(force=True)),
+            ("persistent listings", self._refresh_persistent_listings),
+            ("pc builder", self._refresh_pc_builder),
+            ("runtime stats", self._refresh_runtime_stats),
+        ]
+
+        for name, callback in refresh_steps:
+            try:
+                callback()
+            except Exception as error:
+                self.logger.exception("Startup refresh failed | step=%s", name)
+                self._write_fatal_log(f"Startup refresh failed during {name}: {error}")
+
+        return False
+
+    def _safe_refresh_runtime_stats(self) -> bool:
+        try:
+            return self._refresh_runtime_stats()
+        except Exception as error:
+            self.logger.exception("Runtime stats refresh failed")
+            self._write_fatal_log(f"Runtime stats refresh failed: {error}")
+            return True
+
+    def _safe_refresh_live_results(self) -> bool:
+        try:
+            return self._refresh_live_results()
+        except Exception as error:
+            self.logger.exception("Live results refresh failed")
+            self._write_fatal_log(f"Live results refresh failed: {error}")
+            return True
+
+    def _safe_refresh_persistent_listings(self) -> bool:
+        try:
+            return self._refresh_persistent_listings()
+        except Exception as error:
+            self.logger.exception("Persistent listings refresh failed")
+            self._write_fatal_log(f"Persistent listings refresh failed: {error}")
+            return True
+
+    def _write_fatal_log(self, message: str) -> None:
+        try:
+            with open("/tmp/dealwise_fatal.log", "a", encoding="utf-8") as file:
+                file.write(message + "\n")
+        except OSError:
+            pass
 
     def _configure_app_icon(self) -> None:
         icon_dir = Path(__file__).resolve().parents[2] / "assets" / "icon"
