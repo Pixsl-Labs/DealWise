@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.2] - 2026-07-10
+
+### Fixed
+
+- Added Vinted cooldown after HTTP 429 rate limits.
+- Limited manual refresh to 3 saved searches at a time to avoid rate limiting.
+- Fixed saved/favourited deals ignoring Live Deals filters.
+- Fixed price history pollution where full PCs containing CPU names were counted as CPU price history.
+- Fixed repeated refreshes counting the same listing many times in price history.
+- Added outlier trimming to observed price history.
+
+### Added
+
+- Clear Filters button in Live Deals.
+
+### Notes
+
+- README intentionally not changed.
+- Price history is still local observed DealWise history, not completed-sales data yet.
+
 ## [0.6.1] - 2026-07-10
 
 ### Added

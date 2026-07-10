@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from statistics import median
 
 from dealwise.data.database import DatabaseManager
 from dealwise.models import MarketplaceListing
@@ -28,6 +29,24 @@ class PriceHistoryStats:
 def normalise_product_key(title: str) -> str:
     lower = title.lower()
 
+    # Full PCs must be detected before CPU/GPU terms, otherwise a gaming PC
+    # containing "7800X3D" pollutes the standalone CPU price history.
+    full_pc_terms = [
+        "gaming pc",
+        "desktop pc",
+        "complete pc",
+        "full pc",
+        "custom pc",
+        "prebuilt",
+        "computer tower",
+        "gaming computer",
+        "workstation",
+        "pc bundle",
+    ]
+
+    if any(term in lower for term in full_pc_terms):
+        return "full pc"
+
     patterns = [
         (r"rx\s*7900\s*xtx", "rx 7900 xtx"),
         (r"rx\s*7900\s*xt", "rx 7900 xt"),
@@ -46,6 +65,7 @@ def normalise_product_key(title: str) -> str:
         (r"ryzen\s*9\s*7900x", "ryzen 9 7900x"),
         (r"ryzen\s*9\s*7900", "ryzen 9 7900"),
         (r"ryzen\s*7\s*7800x3d", "ryzen 7 7800x3d"),
+        (r"7800x3d", "ryzen 7 7800x3d"),
         (r"ryzen\s*7\s*7700x", "ryzen 7 7700x"),
         (r"ryzen\s*7\s*7700", "ryzen 7 7700"),
         (r"ryzen\s*5\s*7600x", "ryzen 5 7600x"),
@@ -64,7 +84,6 @@ def normalise_product_key(title: str) -> str:
         (r"1\s*tb.*nvme|nvme.*1\s*tb", "1tb nvme"),
         (r"650\s*w.*gold|650w.*gold", "650w gold psu"),
         (r"750\s*w.*gold|750w.*gold", "750w gold psu"),
-        (r"gaming\s*pc|desktop\s*pc|complete\s*pc|full\s*pc|prebuilt", "full pc"),
     ]
 
     for pattern, key in patterns:
@@ -79,8 +98,8 @@ def normalise_product_key(title: str) -> str:
 class PriceHistoryService:
     """Stores and reads observed listing prices.
 
-    Phase 6 starts with prices DealWise has actually seen during searches.
-    Later this can be expanded with completed listings and external history.
+    Stats use one latest price per distinct listing, not every repeated refresh.
+    That prevents one listing being counted 80+ times.
     """
 
     def __init__(self, database: DatabaseManager) -> None:
@@ -94,6 +113,21 @@ class PriceHistoryService:
         product_key = normalise_product_key(listing.title)
 
         with self.database.connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id
+                FROM price_snapshots
+                WHERE dedupe_key = ?
+                  AND price = ?
+                  AND captured_at >= datetime('now', '-6 hours')
+                LIMIT 1
+                """,
+                (listing.dedupe_key, listing.price),
+            ).fetchone()
+
+            if existing is not None:
+                return
+
             connection.execute(
                 """
                 INSERT INTO price_snapshots (
@@ -128,38 +162,73 @@ class PriceHistoryService:
 
     def stats_for_product_key(self, product_key: str) -> PriceHistoryStats | None:
         with self.database.connect() as connection:
-            row = connection.execute(
+            rows = connection.execute(
                 """
                 SELECT
-                    product_key,
-                    COUNT(*) AS sample_count,
-                    MIN(price) AS lowest_price,
-                    MAX(price) AS highest_price,
-                    AVG(price) AS average_price,
-                    (
-                        SELECT price
-                        FROM price_snapshots latest
-                        WHERE latest.product_key = price_snapshots.product_key
-                        ORDER BY latest.captured_at DESC
-                        LIMIT 1
-                    ) AS latest_price,
-                    MAX(captured_at) AS last_seen_at
+                    dedupe_key,
+                    title,
+                    price,
+                    captured_at
                 FROM price_snapshots
                 WHERE product_key = ?
-                GROUP BY product_key
+                ORDER BY captured_at DESC
                 """,
                 (product_key,),
-            ).fetchone()
+            ).fetchall()
 
-        if row is None:
+        latest_by_listing: dict[str, tuple[float, str]] = {}
+
+        for row in rows:
+            dedupe_key = str(row["dedupe_key"])
+            price = float(row["price"] or 0)
+            captured_at = str(row["captured_at"] or "")
+
+            if price <= 0:
+                continue
+
+            if dedupe_key not in latest_by_listing:
+                latest_by_listing[dedupe_key] = (price, captured_at)
+
+        prices = [item[0] for item in latest_by_listing.values()]
+
+        if not prices:
             return None
 
+        filtered_prices = self._remove_outliers(prices)
+
+        if not filtered_prices:
+            filtered_prices = prices
+
+        last_seen_at = ""
+        if latest_by_listing:
+            last_seen_at = max(item[1] for item in latest_by_listing.values())
+
+        latest_price = prices[0]
+
         return PriceHistoryStats(
-            product_key=str(row["product_key"]),
-            sample_count=int(row["sample_count"] or 0),
-            lowest_price=float(row["lowest_price"] or 0),
-            highest_price=float(row["highest_price"] or 0),
-            average_price=float(row["average_price"] or 0),
-            latest_price=float(row["latest_price"] or 0),
-            last_seen_at=str(row["last_seen_at"] or ""),
+            product_key=product_key,
+            sample_count=len(filtered_prices),
+            lowest_price=min(filtered_prices),
+            highest_price=max(filtered_prices),
+            average_price=sum(filtered_prices) / len(filtered_prices),
+            latest_price=latest_price,
+            last_seen_at=last_seen_at,
         )
+
+    def _remove_outliers(self, prices: list[float]) -> list[float]:
+        if len(prices) < 4:
+            return prices
+
+        middle = median(prices)
+
+        if middle <= 0:
+            return prices
+
+        low_cutoff = middle * 0.35
+        high_cutoff = middle * 2.20
+
+        return [
+            price
+            for price in prices
+            if low_cutoff <= price <= high_cutoff
+        ]

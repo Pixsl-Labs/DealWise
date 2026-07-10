@@ -462,6 +462,9 @@ class MainWindow(Gtk.ApplicationWindow):
         apply_filters_button.add_css_class("suggested-action")
         apply_filters_button.connect("clicked", self._on_apply_live_filters_clicked)
 
+        clear_filters_button = Gtk.Button(label="Clear Filters")
+        clear_filters_button.connect("clicked", self._on_clear_live_filters_clicked)
+
         filter_grid.attach(self._form_label("Search"), 0, 0, 1, 1)
         filter_grid.attach(self.live_search_entry, 1, 0, 3, 1)
         filter_grid.attach(self._form_label("Focus"), 0, 1, 1, 1)
@@ -476,6 +479,7 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.attach(self.live_max_price_input, 1, 3, 1, 1)
         filter_grid.attach(self.live_hide_high_scam_check, 2, 3, 1, 1)
         filter_grid.attach(apply_filters_button, 3, 3, 1, 1)
+        filter_grid.attach(clear_filters_button, 3, 4, 1, 1)
 
         filter_card.set_child(filter_grid)
         filter_expander.set_child(filter_card)
@@ -1113,7 +1117,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._worth_live_expanded = self.worth_live_expander.get_expanded()
 
         stats = self.search_manager.get_stats()
-        favourites = self.listing_repository.list_favourites(limit=25)
+        favourites = self._filter_stored_live_results(self.listing_repository.list_favourites(limit=25))
         results = self.search_manager.get_live_results(limit=150)
         filtered_results = self._filter_and_sort_live_results(results)
 
@@ -1134,7 +1138,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if not favourites:
             self.saved_live_list.append(
-                self._simple_row("No favourited/saved deals yet. Click Save on a live deal.")
+                self._simple_row("No saved deals match the current filters. Clear filters to see all saved deals.")
             )
         else:
             for listing in favourites:
@@ -1784,6 +1788,31 @@ class MainWindow(Gtk.ApplicationWindow):
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
 
+    def _on_clear_live_filters_clicked(self, _button: Gtk.Button) -> None:
+        if hasattr(self, "live_search_entry"):
+            self.live_search_entry.set_text("")
+
+        if hasattr(self, "live_focus_dropdown"):
+            self.live_focus_dropdown.set_selected(0)
+
+        if hasattr(self, "live_part_dropdown"):
+            self.live_part_dropdown.set_selected(0)
+
+        if hasattr(self, "live_priority_dropdown"):
+            self.live_priority_dropdown.set_selected(1)
+
+        if hasattr(self, "live_sort_dropdown"):
+            self.live_sort_dropdown.set_selected(0)
+
+        if hasattr(self, "live_max_price_input"):
+            self.live_max_price_input.set_value(0)
+
+        if hasattr(self, "live_hide_high_scam_check"):
+            self.live_hide_high_scam_check.set_active(False)
+
+        self._live_render_signature = ""
+        self._refresh_live_results(force=True)
+
     def _current_hardware_preference(self) -> str:
         if hasattr(self, "hardware_preference_dropdown"):
             return self._dropdown_text(self.hardware_preference_dropdown)
@@ -1854,7 +1883,7 @@ class MainWindow(Gtk.ApplicationWindow):
         stats = self.price_history_service.stats_for_title(title)
 
         if stats is None or stats.sample_count < 2:
-            return ["Price History: learning from seen listings. More samples needed."]
+            return ["Price History: learning from distinct seen listings. More clean samples needed."]
 
         return [
             f"Price History: {stats.sample_count} sample(s)",
@@ -1961,6 +1990,63 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
+
+    def _on_clear_live_filters_clicked(self, _button: Gtk.Button) -> None:
+        if hasattr(self, "live_search_entry"):
+            self.live_search_entry.set_text("")
+
+        if hasattr(self, "live_focus_dropdown"):
+            self.live_focus_dropdown.set_selected(0)
+
+        if hasattr(self, "live_part_dropdown"):
+            self.live_part_dropdown.set_selected(0)
+
+        if hasattr(self, "live_priority_dropdown"):
+            self.live_priority_dropdown.set_selected(1)
+
+        if hasattr(self, "live_sort_dropdown"):
+            self.live_sort_dropdown.set_selected(0)
+
+        if hasattr(self, "live_max_price_input"):
+            self.live_max_price_input.set_value(0)
+
+        if hasattr(self, "live_hide_high_scam_check"):
+            self.live_hide_high_scam_check.set_active(False)
+
+        self._live_render_signature = ""
+        self._refresh_live_results(force=True)
+
+    def _filter_stored_live_results(self, listings: list[StoredListing]) -> list[StoredListing]:
+        search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""
+        part_filter = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
+        max_price = self.live_max_price_input.get_value() if hasattr(self, "live_max_price_input") else 0
+
+        filtered: list[StoredListing] = []
+
+        for listing in listings:
+            inferred_part = infer_part_type(listing.title)
+            haystack = " ".join(
+                [
+                    listing.title,
+                    listing.marketplace,
+                    listing.seller_name or "",
+                    listing.source_query or "",
+                    inferred_part,
+                ]
+            ).lower()
+
+            if search_text and search_text not in haystack:
+                continue
+
+            if part_filter != "All Parts" and inferred_part != part_filter:
+                continue
+
+            if max_price > 0 and listing.price is not None and listing.price > max_price:
+                continue
+
+            filtered.append(listing)
+
+        return filtered
 
     def _filter_and_sort_live_results(self, results: list[MarketplaceListing]) -> list[MarketplaceListing]:
         search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""

@@ -40,6 +40,7 @@ class SearchManager:
         self._seen_listing_keys: set[str] = set()
         self._hidden_listing_keys: set[str] = set()
         self._connector_status = "Connectors idle."
+        self._marketplace_backoff_until: dict[str, datetime] = {}
         self._lock = threading.RLock()
 
         self.listings_analysed = 0
@@ -68,13 +69,43 @@ class SearchManager:
         started_count = 0
 
         for search in searches:
+            if started_count >= 3:
+                with self._lock:
+                    self._connector_status = (
+                        "Started 3 searches. Pausing the rest to avoid marketplace rate limits."
+                    )
+                break
+
             if self.refresh_search(search, manual=True):
                 started_count += 1
 
         return started_count
 
+    def _is_marketplace_backing_off(self, marketplace_name: str) -> bool:
+        backoff_until = self._marketplace_backoff_until.get(marketplace_name.lower())
+
+        if backoff_until is None:
+            return False
+
+        return datetime.now(timezone.utc) < backoff_until
+
+    def _backoff_label(self, marketplace_name: str) -> str:
+        backoff_until = self._marketplace_backoff_until.get(marketplace_name.lower())
+
+        if backoff_until is None:
+            return ""
+
+        local_time = backoff_until.astimezone().strftime("%H:%M")
+        return f"{marketplace_name} is cooling down until {local_time} after rate limiting."
+
     def refresh_search(self, search: SavedSearch, manual: bool = False) -> bool:
         connector = self.marketplace_registry.get(search.marketplace)
+
+        if self._is_marketplace_backing_off(search.marketplace):
+            with self._lock:
+                self._connector_status = self._backoff_label(search.marketplace)
+
+            return False
 
         if connector is None:
             with self._lock:
@@ -188,6 +219,13 @@ class SearchManager:
         try:
             result = connector.search(search, limit=20)
             filtered_listings = self._filter_connector_listings(result.listings, search)
+
+            if result.error and "429" in result.error:
+                with self._lock:
+                    self._marketplace_backoff_until[connector.name.lower()] = datetime.now(timezone.utc) + timedelta(minutes=20)
+                    self._connector_status = (
+                        f"{connector.name} rate-limited DealWise. Cooling down for 20 minutes."
+                    )
             new_count = 0
             inserted_count = 0
             updated_count = 0
