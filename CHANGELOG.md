@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.4.2] - 2026-07-10
+
+### Added
+
+- Live Deals filter and sorting controls.
+- Focus filter for all deals vs checklist matches.
+- Part type filter.
+- Max price filter.
+- High scam risk toggle.
+- Build cost overview in PC Builder.
+- Clearer Current PC Snapshot display.
+- Clearer resale valuation display.
+- More high-end CPU, GPU, motherboard, RAM, PSU, case and cooling options.
+- Rough selected build cost estimates.
+
+### Changed
+
+- Live Deals now skips redraws when content has not changed to reduce lag and image flicker.
+- Target Build Summary updates live when controls change.
+- Search Plan updates live when controls change.
+- Notes area is larger and clearer.
+- Part budgets are no longer left at £0 for Storage and Cooling.
+- CPU, motherboard and RAM options are more strictly filtered by build path.
+
+### Notes
+
+- README intentionally not changed.
+- Compatibility remains rule-based and local, not a full hardware database yet.
+
 ## [0.4.1] - 2026-07-10
 
 ### Added

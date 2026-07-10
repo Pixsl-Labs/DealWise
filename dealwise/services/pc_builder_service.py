@@ -267,6 +267,9 @@ class PCBuilderService:
     def part_options(self, part_type: str, build_path: str):
         return self.catalog.options_for_part(part_type, build_path)
 
+    def option_cost(self, part_type: str, target: str, build_path: str) -> tuple[int, int]:
+        return self.catalog.estimate_option_cost(part_type, target, build_path)
+
     def needed_part_search_queries(self, build_path: str) -> list[str]:
         return self.catalog.search_queries_for_build(self.list_build_parts(), build_path)
 
