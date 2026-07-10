@@ -543,8 +543,193 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_persistent_listings()
 
     def _on_import_pc_clicked(self, _button: Gtk.Button) -> None:
-        self.pc_builder_service.import_current_pc()
+        self._open_pc_import_window()
+
+    def _open_pc_import_window(self) -> None:
+        existing_window = getattr(self, "pc_import_window", None)
+
+        if existing_window is not None:
+            existing_window.present()
+            return
+
+        command = "inxi -Fx"
+
+        window = Gtk.Window()
+        window.set_title("Import Current PC Specs")
+        window.set_transient_for(self)
+        window.set_modal(True)
+        window.set_default_size(900, 700)
+        window.connect("close-request", self._on_pc_import_window_closed)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.set_margin_top(20)
+        root.set_margin_bottom(20)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
+        window.set_child(root)
+
+        root.append(self._heading("Import Current PC Specs"))
+        root.append(
+            self._muted_label(
+                "Linux-first import. Copy the command below, run it in your terminal, then paste the full output back into DealWise."
+            )
+        )
+
+        command_card = Gtk.Frame()
+        command_card.add_css_class("card")
+
+        command_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        command_box.set_margin_top(14)
+        command_box.set_margin_bottom(14)
+        command_box.set_margin_start(14)
+        command_box.set_margin_end(14)
+
+        command_box.append(self._subheading("Step 1 — Copy this command"))
+
+        command_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        command_entry = Gtk.Entry()
+        command_entry.set_text(command)
+        command_entry.set_editable(False)
+        command_entry.set_hexpand(True)
+
+        copy_button = Gtk.Button(label="Copy Command")
+        copy_button.connect("clicked", self._on_copy_pc_import_command_clicked, command)
+
+        command_row.append(command_entry)
+        command_row.append(copy_button)
+        command_box.append(command_row)
+
+        install_hint = self._muted_label(
+            "If inxi is missing, install it with: sudo apt install inxi"
+        )
+        command_box.append(install_hint)
+
+        command_card.set_child(command_box)
+        root.append(command_card)
+
+        paste_card = Gtk.Frame()
+        paste_card.add_css_class("card")
+        paste_card.set_vexpand(True)
+
+        paste_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        paste_box.set_margin_top(14)
+        paste_box.set_margin_bottom(14)
+        paste_box.set_margin_start(14)
+        paste_box.set_margin_end(14)
+
+        paste_box.append(self._subheading("Step 2 — Paste terminal output here"))
+
+        self.pc_import_text_view = Gtk.TextView()
+        self.pc_import_text_view.set_monospace(True)
+        self.pc_import_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.pc_import_text_view.set_vexpand(True)
+        self.pc_import_text_buffer = self.pc_import_text_view.get_buffer()
+
+        paste_scroll = Gtk.ScrolledWindow()
+        paste_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        paste_scroll.set_vexpand(True)
+        paste_scroll.set_child(self.pc_import_text_view)
+        paste_box.append(paste_scroll)
+
+        paste_card.set_child(paste_box)
+        root.append(paste_card)
+
+        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        import_button = Gtk.Button(label="Import Pasted Specs")
+        import_button.add_css_class("suggested-action")
+        import_button.connect("clicked", self._on_import_pc_pasted_output_clicked)
+
+        clear_paste_button = Gtk.Button(label="Clear Pasted Text")
+        clear_paste_button.connect("clicked", self._on_clear_pc_import_paste_clicked)
+
+        clear_saved_button = Gtk.Button(label="Clear Saved PC")
+        clear_saved_button.connect("clicked", self._on_clear_current_pc_clicked)
+
+        close_button = Gtk.Button(label="Close")
+        close_button.connect("clicked", lambda _button: window.close())
+
+        button_row.append(import_button)
+        button_row.append(clear_paste_button)
+        button_row.append(clear_saved_button)
+        button_row.append(close_button)
+        root.append(button_row)
+
+        self.pc_import_status_label = self._muted_label(
+            "Ready. Paste the output from inxi -Fx, then click Import Pasted Specs."
+        )
+        root.append(self.pc_import_status_label)
+
+        self.pc_import_window = window
+        window.present()
+
+    def _on_pc_import_window_closed(self, _window: Gtk.Window) -> bool:
+        self.pc_import_window = None
+        return False
+
+    def _on_copy_pc_import_command_clicked(self, _button: Gtk.Button, command: str) -> None:
+        copied = self._copy_text_to_clipboard(command)
+
+        if copied:
+            self._set_pc_import_status("Command copied. Run it in terminal, then paste the output below.")
+        else:
+            self._set_pc_import_status("Could not copy automatically. Select the command text and copy it manually.")
+
+    def _on_import_pc_pasted_output_clicked(self, _button: Gtk.Button) -> None:
+        if not hasattr(self, "pc_import_text_buffer"):
+            return
+
+        start_iter, end_iter = self.pc_import_text_buffer.get_bounds()
+        raw_output = self.pc_import_text_buffer.get_text(start_iter, end_iter, False).strip()
+
+        if not raw_output:
+            self._set_pc_import_status("Paste the inxi -Fx output before importing.")
+            return
+
+        current_pc = self.pc_builder_service.import_current_pc_from_text(raw_output)
         self._refresh_pc_builder()
+
+        self._set_pc_import_status(
+            f"Imported current PC specs. Detected: {current_pc.system_model}"
+        )
+
+    def _on_clear_pc_import_paste_clicked(self, _button: Gtk.Button) -> None:
+        if hasattr(self, "pc_import_text_buffer"):
+            self.pc_import_text_buffer.set_text("")
+
+        self._set_pc_import_status("Pasted text cleared.")
+
+    def _on_clear_current_pc_clicked(self, _button: Gtk.Button) -> None:
+        self.pc_builder_service.clear_current_pc()
+        self._refresh_pc_builder()
+        self._set_pc_import_status("Saved current PC profile cleared.")
+
+    def _set_pc_import_status(self, message: str) -> None:
+        status_label = getattr(self, "pc_import_status_label", None)
+
+        if status_label is not None:
+            status_label.set_text(message)
+
+    def _copy_text_to_clipboard(self, text: str) -> bool:
+        display = Gdk.Display.get_default()
+
+        if display is None:
+            return False
+
+        clipboard = display.get_clipboard()
+
+        try:
+            clipboard.set_text(text)
+            return True
+        except AttributeError:
+            pass
+
+        try:
+            clipboard.set(text)
+            return True
+        except Exception:
+            return False
 
     def _on_save_target_build_clicked(self, _button: Gtk.Button) -> None:
         self.pc_builder_service.save_target_build(

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.1] - 2026-07-10
+
+### Added
+
+- Linux-first current PC import window.
+- Copyable inxi -Fx command.
+- Manual paste workflow for importing PC specs.
+- Clear pasted import text action.
+- Clear saved current PC profile action.
+
+### Changed
+
+- Import Current PC now opens a transparent command/paste workflow instead of silently running inxi.
+
+### Notes
+
+- README intentionally not changed.
+- Automatic inxi parsing service remains available internally.
+
 ## [0.3.0] - 2026-07-09
 
 ### Added

@@ -68,6 +68,30 @@ class PCBuilderService:
         self.save_current_pc(current_pc)
         return current_pc
 
+    def import_current_pc_from_text(self, raw_output: str) -> CurrentPC:
+        """Import current PC details from pasted inxi output.
+
+        This is safer and more transparent than automatically running commands
+        because the user can see exactly what command is used and what output is
+        imported into DealWise.
+        """
+
+        cleaned_output = raw_output.strip()
+
+        if not cleaned_output:
+            cleaned_output = "No system information was pasted."
+
+        current_pc = self.parse_inxi(cleaned_output)
+        self.save_current_pc(current_pc)
+        return current_pc
+
+    def clear_current_pc(self) -> None:
+        """Remove the saved current PC profile."""
+
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM current_pc WHERE id = 1")
+            connection.commit()
+
     def parse_inxi(self, raw_output: str) -> CurrentPC:
         system_model = self._extract_first_match(
             raw_output,

@@ -968,3 +968,43 @@ Phase 3 is successful when:
 # Suggested Commit Message
 
 feat: plan Phase 3 PC builder and listing intelligence
+
+
+---
+
+# Phase 3 UI Update — Manual Current PC Import Window
+
+## Goal
+
+Current PC import should be transparent and Linux-first.
+
+Instead of silently running system commands, DealWise opens an import window where the user can:
+
+- Copy the Linux command.
+- Run it manually in terminal.
+- Paste the response back into DealWise.
+- Import the pasted specs.
+- Clear pasted text.
+- Clear the saved PC profile.
+
+## Linux Command
+
+    inxi -Fx
+
+## Why This Is Better
+
+- User can see exactly what command is being used.
+- User controls what output is imported.
+- App avoids hidden command execution.
+- It is safer and easier to debug.
+- It prepares the app for Windows/manual import later.
+
+## Success Criteria
+
+- Import Current PC opens a new window.
+- Command is visible and copyable.
+- User can paste inxi output.
+- Pasted output can be imported.
+- Pasted output can be cleared.
+- Saved PC profile can be cleared.
+- PC Builder refreshes after import or clear.
