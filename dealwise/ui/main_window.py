@@ -359,7 +359,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._subheading("Parts Checklist"))
         page.append(
             self._muted_label(
-                "Dropdowns are filtered by build path and hardware preference. Higher entries are stronger and usually more expensive."
+                "Dropdowns are filtered by build path and hardware preference. Use Stop Searching when you have found a part and do not want DealWise to keep searching that category."
             )
         )
 
@@ -1625,12 +1625,16 @@ class MainWindow(Gtk.ApplicationWindow):
         later_button = Gtk.Button(label="Later")
         later_button.connect("clicked", self._on_part_status_clicked, part.id, "Upgrade Later")
 
+        stop_search_button = Gtk.Button(label="Stop Searching")
+        stop_search_button.connect("clicked", self._on_part_status_clicked, part.id, "Stop Searching")
+
         top.append(details)
         top.append(target_dropdown)
         top.append(use_button)
         top.append(needed_button)
         top.append(bought_button)
         top.append(later_button)
+        top.append(stop_search_button)
 
         wrapper.append(top)
 

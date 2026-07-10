@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.1] - 2026-07-10
+
+### Added
+
+- Stop Searching status for PC Builder checklist parts.
+- Parts marked Stop Searching are skipped by Search Needed Parts.
+- Global laptop/notebook blocking for live marketplace results.
+
+### Fixed
+
+- Blocked laptop-style listings such as Zenbook, ThinkPad, MacBook, Chromebook and notebooks from appearing as PC part deals.
+- Applied blocked/excluded keyword filtering before storing marketplace results.
+
+### Notes
+
+- README intentionally not changed.
+- Existing laptop listings are removed from the local DealWise database by this update.
+
 ## [0.6.0] - 2026-07-10
 
 ### Added

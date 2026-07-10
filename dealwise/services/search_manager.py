@@ -10,7 +10,7 @@ from gi.repository import GLib
 from dealwise.config import ConfigManager
 from dealwise.marketplaces.registry import MarketplaceRegistry
 from dealwise.models import MarketplaceListing, RuntimeStats, SavedSearch
-from dealwise.repositories.listing_repository import ListingRepository
+from dealwise.repositories.listing_repository import ListingRepository, is_blocked_listing_title
 
 
 class SearchManager:
@@ -139,6 +139,43 @@ class SearchManager:
             last_refresh_at=self.last_refresh_at,
         )
 
+    def _filter_connector_listings(
+        self,
+        listings: list[MarketplaceListing],
+        search: SavedSearch,
+    ) -> list[MarketplaceListing]:
+        filtered: list[MarketplaceListing] = []
+
+        excluded_terms = [term.lower().strip() for term in search.excluded_keywords if term.strip()]
+        global_excluded_terms = [
+            "laptop",
+            "notebook",
+            "ultrabook",
+            "zenbook",
+            "vivobook",
+            "thinkpad",
+            "ideapad",
+            "macbook",
+            "chromebook",
+            "surface laptop",
+        ]
+
+        for listing in listings:
+            title = listing.title.lower()
+
+            if is_blocked_listing_title(listing.title):
+                continue
+
+            if any(term in title for term in excluded_terms):
+                continue
+
+            if any(term in title for term in global_excluded_terms):
+                continue
+
+            filtered.append(listing)
+
+        return filtered
+
     def _refresh_search_worker(self, search: SavedSearch, manual: bool) -> None:
         connector = self.marketplace_registry.get(search.marketplace)
         now = datetime.now(timezone.utc)
@@ -150,17 +187,18 @@ class SearchManager:
 
         try:
             result = connector.search(search, limit=20)
+            filtered_listings = self._filter_connector_listings(result.listings, search)
             new_count = 0
             inserted_count = 0
             updated_count = 0
 
-            if self.listing_repository is not None and result.listings:
+            if self.listing_repository is not None and filtered_listings:
                 inserted_count, updated_count = self.listing_repository.upsert_marketplace_listings(
-                    result.listings
+                    filtered_listings
                 )
 
             with self._lock:
-                for listing in result.listings:
+                for listing in filtered_listings:
                     if listing.dedupe_key in self._hidden_listing_keys:
                         continue
 
@@ -172,7 +210,7 @@ class SearchManager:
                     new_count += 1
 
                 self._live_results = self._live_results[:250]
-                self.listings_analysed += len(result.listings)
+                self.listings_analysed += len(filtered_listings)
                 self.refreshes_completed += 1
                 self.last_refresh_at = datetime.now(timezone.utc)
                 self._last_refresh_by_search_id[search.id] = self.last_refresh_at
@@ -194,7 +232,7 @@ class SearchManager:
                     "Connector refresh completed | marketplace=%s | query=%s | returned=%s | session_new=%s | db_inserted=%s | db_updated=%s | manual=%s",
                     connector.name,
                     search.query,
-                    len(result.listings),
+                    len(filtered_listings),
                     new_count,
                     inserted_count,
                     updated_count,

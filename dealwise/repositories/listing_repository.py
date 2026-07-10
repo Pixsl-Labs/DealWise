@@ -411,3 +411,27 @@ def infer_part_type(title: str) -> str:
         return "Cooling"
 
     return "Unknown"
+
+
+def is_blocked_listing_title(title: str) -> bool:
+    """Hard-block categories DealWise should not show as PC part deals."""
+
+    lower = title.lower()
+
+    blocked_terms = [
+        "laptop",
+        "notebook",
+        "ultrabook",
+        "zenbook",
+        "vivobook",
+        "thinkpad",
+        "ideapad",
+        "macbook",
+        "chromebook",
+        "surface pro",
+        "surface laptop",
+        "ipad",
+        "tablet",
+    ]
+
+    return any(term in lower for term in blocked_terms)

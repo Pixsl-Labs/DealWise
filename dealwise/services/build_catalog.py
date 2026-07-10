@@ -231,7 +231,7 @@ class BuildCatalog:
         queries: list[str] = []
 
         for part in parts:
-            if getattr(part, "status", "") == "Bought":
+            if getattr(part, "status", "") in {"Bought", "Upgrade Later", "Stop Searching", "Not Looking"}:
                 continue
 
             target = getattr(part, "target", "").strip()
