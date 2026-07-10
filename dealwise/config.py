@@ -23,6 +23,7 @@ class ConfigManager:
 
         self.config_file = self.app_dir / "config.json"
         self.searches_file = self.app_dir / "searches.json"
+        self.database_file = self.database_dir / "dealwise.db"
 
         self.ensure_directories()
         self.ensure_default_files()

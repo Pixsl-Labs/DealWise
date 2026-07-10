@@ -10,14 +10,21 @@ from gi.repository import GLib
 from dealwise.config import ConfigManager
 from dealwise.marketplaces.registry import MarketplaceRegistry
 from dealwise.models import MarketplaceListing, RuntimeStats, SavedSearch
+from dealwise.repositories.listing_repository import ListingRepository
 
 
 class SearchManager:
     """Coordinates saved-search refresh scheduling and marketplace dispatch."""
 
-    def __init__(self, config_manager: ConfigManager, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        config_manager: ConfigManager,
+        logger: logging.Logger,
+        listing_repository: ListingRepository | None = None,
+    ) -> None:
         self.config_manager = config_manager
         self.logger = logger
+        self.listing_repository = listing_repository
         self.marketplace_registry = MarketplaceRegistry()
 
         self.is_running = False
@@ -66,8 +73,6 @@ class SearchManager:
         return started_count
 
     def refresh_search(self, search: SavedSearch, manual: bool = False) -> bool:
-        """Start an asynchronous marketplace refresh for a saved search."""
-
         connector = self.marketplace_registry.get(search.marketplace)
 
         if connector is None:
@@ -135,6 +140,13 @@ class SearchManager:
         try:
             result = connector.search(search, limit=20)
             new_count = 0
+            inserted_count = 0
+            updated_count = 0
+
+            if self.listing_repository is not None and result.listings:
+                inserted_count, updated_count = self.listing_repository.upsert_marketplace_listings(
+                    result.listings
+                )
 
             with self._lock:
                 for listing in result.listings:
@@ -152,7 +164,8 @@ class SearchManager:
                 self._last_refresh_by_search_id[search.id] = self.last_refresh_at
                 self._next_due_by_search_id[search.id] = self._calculate_next_due(search)
                 self._connector_status = (
-                    f"{result.status_message} New this run: {new_count}."
+                    f"{result.status_message} New this session: {new_count}. "
+                    f"DB inserted: {inserted_count}, updated: {updated_count}."
                 )
 
             if result.error:
@@ -164,11 +177,13 @@ class SearchManager:
                 )
             else:
                 self.logger.info(
-                    "Connector refresh completed | marketplace=%s | query=%s | returned=%s | new=%s | manual=%s",
+                    "Connector refresh completed | marketplace=%s | query=%s | returned=%s | session_new=%s | db_inserted=%s | db_updated=%s | manual=%s",
                     connector.name,
                     search.query,
                     len(result.listings),
                     new_count,
+                    inserted_count,
+                    updated_count,
                     manual,
                 )
         except Exception as error:

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0] - 2026-07-09
+
+### Added
+
+- SQLite database initialisation.
+- Persistent listing repository.
+- Durable listing deduplication.
+- Saved Listings page.
+- PC Builder page.
+- Current PC import using inxi -Fx.
+- Target build budget and platform fields.
+- Parts checklist foundation.
+- Listing Checker page.
+- Manual listing save flow.
+- Buy decision placeholder.
+- Deal/scam/build/budget/evidence placeholder scoring.
+- Seller message generator.
+- Phase 3 planning status update.
+
+### Notes
+
+- README intentionally not changed during Phase 3 activation.
+- Advanced scoring remains explainable placeholder logic.
+- Marketplace login and buying automation remain non-goals.
+
 All notable changes to DealWise will be documented in this file.
 
 ## [0.2.0] - 2026-07-09
