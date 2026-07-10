@@ -1776,7 +1776,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self.image_cache.fetch_async(image_url, apply_image)
         return frame
 
-
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
