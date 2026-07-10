@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.1] - 2026-07-10
+
+### Added
+
+- Visible Live Deals card layout.
+- Remove button for live listings.
+- Remove button for stored/saved listings.
+- Persisted open/closed state for Live Deals sections.
+- Phase 6 through Phase 14 planning documents.
+
+### Changed
+
+- Individual listings are no longer collapsible expanders.
+- Only Saved / Favourited Deals and New / Worth Checking are collapsible.
+- Live deal rows now show decision, scores, reasoning, URL, image area, and actions immediately.
+
+### Notes
+
+- README intentionally not changed.
+- Full future phases are documented as foundations, not claimed as production-complete.
+
 ## [0.4.0] - 2026-07-10
 
 ### Added

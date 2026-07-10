@@ -292,15 +292,15 @@ class MainWindow(Gtk.ApplicationWindow):
         title_box.append(self._heading("Live Deals"))
         title_box.append(
             self._muted_label(
-                "Phase 4/5 foundation: deal rows now prioritise your parts checklist, show thumbnails where available, and separate saved favourites from worth-checking results."
+                "Visible deal cards. Sections are collapsible, but individual listings stay readable and actionable."
             )
         )
 
-        refresh_button = Gtk.Button(label="Search Now")
-        refresh_button.connect("clicked", self._on_manual_refresh_clicked)
-
         search_parts_button = Gtk.Button(label="Search Needed Parts")
         search_parts_button.connect("clicked", self._on_search_needed_parts_clicked)
+
+        refresh_button = Gtk.Button(label="Search Now")
+        refresh_button.connect("clicked", self._on_manual_refresh_clicked)
 
         top_row.append(title_box)
         top_row.append(search_parts_button)
@@ -322,17 +322,24 @@ class MainWindow(Gtk.ApplicationWindow):
         status_card.set_child(status_box)
         page.append(status_card)
 
+        self._saved_live_expanded = getattr(self, "_saved_live_expanded", True)
+        self._worth_live_expanded = getattr(self, "_worth_live_expanded", True)
+
         self.saved_live_expander = Gtk.Expander(label="Saved / Favourited Deals")
-        self.saved_live_expander.set_expanded(True)
+        self.saved_live_expander.set_expanded(self._saved_live_expanded)
         self.saved_live_expander.set_margin_top(16)
+        self.saved_live_expander.connect("notify::expanded", self._on_saved_live_expanded_changed)
+
         self.saved_live_list = Gtk.ListBox()
         self.saved_live_list.add_css_class("saved-search-list")
         self.saved_live_expander.set_child(self.saved_live_list)
         page.append(self.saved_live_expander)
 
         self.worth_live_expander = Gtk.Expander(label="New / Worth Checking")
-        self.worth_live_expander.set_expanded(True)
+        self.worth_live_expander.set_expanded(self._worth_live_expanded)
         self.worth_live_expander.set_margin_top(16)
+        self.worth_live_expander.connect("notify::expanded", self._on_worth_live_expanded_changed)
+
         self.worth_live_list = Gtk.ListBox()
         self.worth_live_list.add_css_class("saved-search-list")
         self.worth_live_expander.set_child(self.worth_live_list)
@@ -562,6 +569,28 @@ class MainWindow(Gtk.ApplicationWindow):
         if page_id is not None:
             self.stack.set_visible_child_name(page_id)
 
+    def _on_saved_live_expanded_changed(self, *_args) -> None:
+        if hasattr(self, "saved_live_expander"):
+            self._saved_live_expanded = self.saved_live_expander.get_expanded()
+
+    def _on_worth_live_expanded_changed(self, *_args) -> None:
+        if hasattr(self, "worth_live_expander"):
+            self._worth_live_expanded = self.worth_live_expander.get_expanded()
+
+    def _on_remove_live_listing_clicked(self, _button: Gtk.Button, listing: MarketplaceListing) -> None:
+        self.search_manager.hide_live_listing(listing.dedupe_key)
+        self.listing_repository.delete_listing(listing.dedupe_key)
+        self._refresh_live_results()
+        self._refresh_persistent_listings()
+        self._refresh_runtime_stats()
+
+    def _on_delete_stored_listing_clicked(self, _button: Gtk.Button, dedupe_key: str) -> None:
+        self.listing_repository.delete_listing(dedupe_key)
+        self.search_manager.hide_live_listing(dedupe_key)
+        self._refresh_live_results()
+        self._refresh_persistent_listings()
+        self._refresh_runtime_stats()
+
     def _on_manual_refresh_clicked(self, _button: Gtk.Button) -> None:
         started_count = self.search_manager.refresh_all_saved_searches()
         self.logger.info("Manual refresh requested | started=%s", started_count)
@@ -616,11 +645,15 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_save_live_listing_clicked(self, _button: Gtk.Button, listing: MarketplaceListing) -> None:
         self.listing_repository.upsert_marketplace_listings([listing])
         self.listing_repository.update_status(listing.dedupe_key, "Watching")
+        self._refresh_live_results()
         self._refresh_persistent_listings()
+        self._refresh_runtime_stats()
 
     def _on_status_clicked(self, _button: Gtk.Button, dedupe_key: str, status: str) -> None:
         self.listing_repository.update_status(dedupe_key, status)
+        self._refresh_live_results()
         self._refresh_persistent_listings()
+        self._refresh_runtime_stats()
 
     def _on_import_pc_clicked(self, _button: Gtk.Button) -> None:
         self._open_pc_import_window()
@@ -910,6 +943,12 @@ class MainWindow(Gtk.ApplicationWindow):
         if not hasattr(self, "worth_live_list"):
             return True
 
+        if hasattr(self, "saved_live_expander"):
+            self._saved_live_expanded = self.saved_live_expander.get_expanded()
+
+        if hasattr(self, "worth_live_expander"):
+            self._worth_live_expanded = self.worth_live_expander.get_expanded()
+
         self._clear_listbox(self.worth_live_list)
         self._clear_listbox(self.saved_live_list)
 
@@ -921,13 +960,19 @@ class MainWindow(Gtk.ApplicationWindow):
         favourites = self.listing_repository.list_favourites(limit=25)
 
         if not favourites:
-            self.saved_live_list.append(self._simple_row("No favourited/saved deals yet. Click Save on a live deal."))
+            self.saved_live_list.append(
+                self._simple_row("No favourited/saved deals yet. Click Save on a live deal.")
+            )
         else:
             for listing in favourites:
                 self.saved_live_list.append(self._stored_listing_row(listing))
 
         results = self.search_manager.get_live_results(limit=100)
-        worth_results = [listing for listing in results if self._listing_matches_needed_parts(listing)]
+        worth_results = [
+            listing
+            for listing in results
+            if self._listing_matches_needed_parts(listing)
+        ]
 
         if not worth_results:
             self.worth_live_list.append(
@@ -937,6 +982,12 @@ class MainWindow(Gtk.ApplicationWindow):
 
         for listing in worth_results:
             self.worth_live_list.append(self._listing_row(listing))
+
+        if hasattr(self, "saved_live_expander"):
+            self.saved_live_expander.set_expanded(self._saved_live_expanded)
+
+        if hasattr(self, "worth_live_expander"):
+            self.worth_live_expander.set_expanded(self._worth_live_expanded)
 
         return True
 
@@ -1100,24 +1151,36 @@ class MainWindow(Gtk.ApplicationWindow):
             budget=self.pc_builder_service.get_target_build().total_budget,
         )
 
-        expander = Gtk.Expander(label=f"{decision.decision}: {listing.title}")
-        expander.set_expanded(False)
+        frame = Gtk.Frame()
+        frame.add_css_class("deal-card")
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        wrapper.set_margin_top(12)
-        wrapper.set_margin_bottom(12)
-        wrapper.set_margin_start(12)
-        wrapper.set_margin_end(12)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.set_margin_top(14)
+        outer.set_margin_bottom(14)
+        outer.set_margin_start(14)
+        outer.set_margin_end(14)
 
-        image_box = self._listing_image_widget(listing.image_url)
-        wrapper.append(image_box)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
-        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        details.set_hexpand(True)
+        decision_label = Gtk.Label(label=decision.decision)
+        decision_label.add_css_class("decision-badge")
 
         title = Gtk.Label(label=listing.title, xalign=0)
         title.add_css_class("row-title")
         title.set_wrap(True)
+        title.set_hexpand(True)
+
+        header.append(decision_label)
+        header.append(title)
+        outer.append(header)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+
+        image_box = self._listing_image_widget(listing.image_url)
+        body.append(image_box)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        details.set_hexpand(True)
 
         meta_parts = [listing.marketplace, listing.price_label()]
         if listing.seller_name:
@@ -1131,32 +1194,30 @@ class MainWindow(Gtk.ApplicationWindow):
 
         scores = Gtk.Label(
             label=(
-                f"Deal {decision.deal_score}/100 • Scam {decision.scam_risk}/10 • "
-                f"Build fit {decision.build_fit}/100 • Evidence {decision.evidence_confidence}/100"
+                f"Deal {decision.deal_score}/100  •  Scam {decision.scam_risk}/10  •  "
+                f"Build fit {decision.build_fit}/100  •  Evidence {decision.evidence_confidence}/100"
             ),
             xalign=0,
         )
-        scores.add_css_class("muted")
+        scores.add_css_class("score-line")
         scores.set_wrap(True)
+
+        reasoning_text = " | ".join(decision.reasoning[:3])
+        reasoning = Gtk.Label(label=reasoning_text, xalign=0)
+        reasoning.add_css_class("muted")
+        reasoning.set_wrap(True)
 
         url_label = Gtk.Label(label=listing.url, xalign=0)
         url_label.add_css_class("muted")
         url_label.set_wrap(True)
 
-        reason_label = Gtk.Label(label=" | ".join(decision.reasoning[:2]), xalign=0)
-        reason_label.add_css_class("muted")
-        reason_label.set_wrap(True)
-
-        details.append(title)
-        details.append(meta)
-        details.append(scores)
-        details.append(reason_label)
-        details.append(url_label)
-
         button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
         save_button = Gtk.Button(label="Save")
         save_button.connect("clicked", self._on_save_live_listing_clicked, listing)
+
+        remove_button = Gtk.Button(label="Remove")
+        remove_button.connect("clicked", self._on_remove_live_listing_clicked, listing)
 
         open_button = Gtk.Button(label="Open")
         open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
@@ -1165,15 +1226,21 @@ class MainWindow(Gtk.ApplicationWindow):
         image_button.connect("clicked", self._on_image_check_clicked, listing.image_url)
 
         button_row.append(save_button)
+        button_row.append(remove_button)
         button_row.append(open_button)
         button_row.append(image_button)
 
+        details.append(meta)
+        details.append(scores)
+        details.append(reasoning)
+        details.append(url_label)
         details.append(button_row)
 
-        wrapper.append(details)
-        expander.set_child(wrapper)
+        body.append(details)
+        outer.append(body)
 
-        row.set_child(expander)
+        frame.set_child(outer)
+        row.set_child(frame)
         return row
 
     def _stored_listing_row(self, listing: StoredListing) -> Gtk.ListBoxRow:
@@ -1185,27 +1252,39 @@ class MainWindow(Gtk.ApplicationWindow):
             budget=self.pc_builder_service.get_target_build().total_budget,
         )
 
-        expander = Gtk.Expander(label=f"{listing.status}: {listing.title}")
-        expander.set_expanded(False)
+        frame = Gtk.Frame()
+        frame.add_css_class("deal-card")
 
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        wrapper.set_margin_top(12)
-        wrapper.set_margin_bottom(12)
-        wrapper.set_margin_start(12)
-        wrapper.set_margin_end(12)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.set_margin_top(14)
+        outer.set_margin_bottom(14)
+        outer.set_margin_start(14)
+        outer.set_margin_end(14)
 
-        image_box = self._listing_image_widget(listing.image_url)
-        wrapper.append(image_box)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
 
-        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        details.set_hexpand(True)
+        status_label = Gtk.Label(label=listing.status)
+        status_label.add_css_class("decision-badge")
 
         title = Gtk.Label(label=listing.title, xalign=0)
         title.add_css_class("row-title")
         title.set_wrap(True)
+        title.set_hexpand(True)
+
+        header.append(status_label)
+        header.append(title)
+        outer.append(header)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+
+        image_box = self._listing_image_widget(listing.image_url)
+        body.append(image_box)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        details.set_hexpand(True)
 
         meta = Gtk.Label(
-            label=f"{listing.marketplace} • {listing.price_label()} • {listing.part_type} • {listing.status}",
+            label=f"{listing.marketplace} • {listing.price_label()} • {listing.part_type} • Decision: {decision.decision}",
             xalign=0,
         )
         meta.add_css_class("muted")
@@ -1213,19 +1292,18 @@ class MainWindow(Gtk.ApplicationWindow):
 
         scores = Gtk.Label(
             label=(
-                f"Decision: {decision.decision} • Deal {decision.deal_score}/100 • "
-                f"Scam {decision.scam_risk}/10 • Build fit {decision.build_fit}/100"
+                f"Deal {decision.deal_score}/100  •  Scam {decision.scam_risk}/10  •  "
+                f"Build fit {decision.build_fit}/100  •  Evidence {decision.evidence_confidence}/100"
             ),
             xalign=0,
         )
-        scores.add_css_class("muted")
+        scores.add_css_class("score-line")
         scores.set_wrap(True)
 
         url_label = Gtk.Label(label=listing.url, xalign=0)
         url_label.add_css_class("muted")
         url_label.set_wrap(True)
 
-        details.append(title)
         details.append(meta)
         details.append(scores)
 
@@ -1248,6 +1326,9 @@ class MainWindow(Gtk.ApplicationWindow):
         avoid_button = Gtk.Button(label="Avoid")
         avoid_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Avoided")
 
+        remove_button = Gtk.Button(label="Remove")
+        remove_button.connect("clicked", self._on_delete_stored_listing_clicked, listing.dedupe_key)
+
         open_button = Gtk.Button(label="Open")
         open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
 
@@ -1258,15 +1339,17 @@ class MainWindow(Gtk.ApplicationWindow):
         button_row.append(watch_button)
         button_row.append(bought_button)
         button_row.append(avoid_button)
+        button_row.append(remove_button)
         button_row.append(open_button)
         button_row.append(image_button)
 
         details.append(button_row)
 
-        wrapper.append(details)
-        expander.set_child(wrapper)
+        body.append(details)
+        outer.append(body)
 
-        row.set_child(expander)
+        frame.set_child(outer)
+        row.set_child(frame)
         return row
 
     def _build_part_row(self, part) -> Gtk.ListBoxRow:
@@ -1664,6 +1747,32 @@ class MainWindow(Gtk.ApplicationWindow):
             background: #1b1f29;
             border: 1px solid #2b303b;
             border-radius: 14px;
+        }
+
+        .deal-card {
+            background: #1b1f29;
+            border: 1px solid #2b303b;
+            border-radius: 14px;
+            margin-bottom: 10px;
+        }
+
+        .decision-badge {
+            background: #263241;
+            color: #ffffff;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 6px 10px;
+        }
+
+        .score-line {
+            color: #d6e2f2;
+            font-weight: 700;
+        }
+
+        .image-card {
+            background: #111318;
+            border: 1px solid #2b303b;
+            border-radius: 12px;
         }
 
         .stat-value {

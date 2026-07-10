@@ -38,6 +38,7 @@ class SearchManager:
 
         self._live_results: list[MarketplaceListing] = []
         self._seen_listing_keys: set[str] = set()
+        self._hidden_listing_keys: set[str] = set()
         self._connector_status = "Connectors idle."
         self._lock = threading.RLock()
 
@@ -108,6 +109,16 @@ class SearchManager:
         with self._lock:
             return list(self._live_results[:limit])
 
+    def hide_live_listing(self, dedupe_key: str) -> None:
+        with self._lock:
+            self._hidden_listing_keys.add(dedupe_key)
+            self._live_results = [
+                listing
+                for listing in self._live_results
+                if listing.dedupe_key != dedupe_key
+            ]
+            self._connector_status = "Listing removed from current Live Deals view."
+
     def get_stats(self) -> RuntimeStats:
         saved_searches = self.config_manager.load_saved_searches()
 
@@ -150,6 +161,9 @@ class SearchManager:
 
             with self._lock:
                 for listing in result.listings:
+                    if listing.dedupe_key in self._hidden_listing_keys:
+                        continue
+
                     if listing.dedupe_key in self._seen_listing_keys:
                         continue
 

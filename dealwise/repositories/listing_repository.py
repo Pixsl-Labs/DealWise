@@ -280,6 +280,14 @@ class ListingRepository:
             )
             connection.commit()
 
+    def delete_listing(self, dedupe_key: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                "DELETE FROM listings WHERE dedupe_key = ?",
+                (dedupe_key,),
+            )
+            connection.commit()
+
     def count_all(self) -> int:
         with self.database.connect() as connection:
             row = connection.execute("SELECT COUNT(*) AS count FROM listings").fetchone()
