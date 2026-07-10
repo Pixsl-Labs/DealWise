@@ -17,6 +17,8 @@ from dealwise.services.pc_builder_service import PCBuilderService
 from dealwise.services.search_manager import SearchManager
 from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
+from dealwise.services.price_history import PriceHistoryService
+from dealwise.services.compatibility_service import CompatibilityService
 
 
 HARDWARE_PREFERENCE_OPTIONS = [
@@ -63,6 +65,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.stat_labels: dict[str, Gtk.Label] = {}
         self.image_cache = ImageCacheService(self.config_manager.cache_dir / "listing-images")
+        self.price_history_service = PriceHistoryService(self.pc_builder_service.database)
+        self.compatibility_service = CompatibilityService()
         self._live_render_signature = ""
         self._pc_builder_refresh_timer_id: int | None = None
 
@@ -377,7 +381,7 @@ class MainWindow(Gtk.ApplicationWindow):
         title_box.append(self._heading("Live Deals"))
         title_box.append(
             self._muted_label(
-                "Smooth deal cards with manual filter apply, image caching, priority sorting, and improved deal scores."
+                "Search, filter, sort and compare live marketplace results. Phase 6 price history now improves deal scoring as DealWise learns from seen listings."
             )
         )
 
@@ -407,7 +411,7 @@ class MainWindow(Gtk.ApplicationWindow):
         status_card.set_child(status_box)
         page.append(status_card)
 
-        filter_expander = Gtk.Expander(label="Filters and Sorting")
+        filter_expander = Gtk.Expander(label="Search, Filters and Sorting")
         filter_expander.set_expanded(True)
         filter_expander.set_margin_top(14)
 
@@ -421,6 +425,9 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.set_margin_bottom(14)
         filter_grid.set_margin_start(14)
         filter_grid.set_margin_end(14)
+
+        self.live_search_entry = Gtk.Entry()
+        self.live_search_entry.set_placeholder_text("Search shown deals, e.g. RX 6800, Ryzen 7700, full PC")
 
         self.live_focus_dropdown = Gtk.DropDown.new_from_strings(
             ["All Live Deals", "Checklist Matches Only"]
@@ -442,6 +449,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Lowest Scam Risk",
                 "Highest Build Fit",
                 "Highest Evidence Confidence",
+                "Lowest Historical Price",
             ]
         )
 
@@ -454,18 +462,20 @@ class MainWindow(Gtk.ApplicationWindow):
         apply_filters_button.add_css_class("suggested-action")
         apply_filters_button.connect("clicked", self._on_apply_live_filters_clicked)
 
-        filter_grid.attach(self._form_label("Focus"), 0, 0, 1, 1)
-        filter_grid.attach(self.live_focus_dropdown, 1, 0, 1, 1)
-        filter_grid.attach(self._form_label("Part"), 2, 0, 1, 1)
-        filter_grid.attach(self.live_part_dropdown, 3, 0, 1, 1)
-        filter_grid.attach(self._form_label("Show First"), 0, 1, 1, 1)
-        filter_grid.attach(self.live_priority_dropdown, 1, 1, 1, 1)
-        filter_grid.attach(self._form_label("Sort"), 2, 1, 1, 1)
-        filter_grid.attach(self.live_sort_dropdown, 3, 1, 1, 1)
-        filter_grid.attach(self._form_label("Max Price"), 0, 2, 1, 1)
-        filter_grid.attach(self.live_max_price_input, 1, 2, 1, 1)
-        filter_grid.attach(self.live_hide_high_scam_check, 2, 2, 1, 1)
-        filter_grid.attach(apply_filters_button, 3, 2, 1, 1)
+        filter_grid.attach(self._form_label("Search"), 0, 0, 1, 1)
+        filter_grid.attach(self.live_search_entry, 1, 0, 3, 1)
+        filter_grid.attach(self._form_label("Focus"), 0, 1, 1, 1)
+        filter_grid.attach(self.live_focus_dropdown, 1, 1, 1, 1)
+        filter_grid.attach(self._form_label("Part"), 2, 1, 1, 1)
+        filter_grid.attach(self.live_part_dropdown, 3, 1, 1, 1)
+        filter_grid.attach(self._form_label("Show First"), 0, 2, 1, 1)
+        filter_grid.attach(self.live_priority_dropdown, 1, 2, 1, 1)
+        filter_grid.attach(self._form_label("Sort"), 2, 2, 1, 1)
+        filter_grid.attach(self.live_sort_dropdown, 3, 2, 1, 1)
+        filter_grid.attach(self._form_label("Max Price"), 0, 3, 1, 1)
+        filter_grid.attach(self.live_max_price_input, 1, 3, 1, 1)
+        filter_grid.attach(self.live_hide_high_scam_check, 2, 3, 1, 1)
+        filter_grid.attach(apply_filters_button, 3, 3, 1, 1)
 
         filter_card.set_child(filter_grid)
         filter_expander.set_child(filter_card)
@@ -1132,7 +1142,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if not filtered_results:
             self.worth_live_list.append(
-                self._simple_row("No results match the current filters. Try All Live Deals, clear max price, or run Search Needed Parts.")
+                self._simple_row("No results match the current filters. Try searching less specifically, choose All Live Deals, clear max price, or run Search Needed Parts.")
             )
             return True
 
@@ -1179,10 +1189,10 @@ class MainWindow(Gtk.ApplicationWindow):
         parts = self.pc_builder_service.list_build_parts()
 
         selected_use_case = self._current_use_case()
-        selected_hardware_preference = self._current_hardware_preference()
         selected_build_path = self._current_build_path()
         selected_budget = self._current_budget()
         selected_notes = self._get_target_notes()
+        selected_hardware_preference = self._current_hardware_preference()
 
         bought_count = sum(1 for part in parts if part.status == "Bought")
         needed_count = sum(1 for part in parts if part.status != "Bought")
@@ -1268,6 +1278,17 @@ class MainWindow(Gtk.ApplicationWindow):
                 )
             )
 
+            self.compatibility_box.append(
+                self._section_card(
+                    "Selected Parts Compatibility",
+                    self.compatibility_service.analyse_build(
+                        parts,
+                        selected_build_path,
+                        selected_hardware_preference,
+                    ),
+                )
+            )
+
             search_queries = self.pc_builder_service.needed_part_search_queries(selected_build_path)
 
             self.compatibility_box.append(
@@ -1326,14 +1347,7 @@ class MainWindow(Gtk.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
 
-        decision = self.listing_intelligence_service.analyse(
-            title=listing.title,
-            price=listing.price,
-            url=listing.url,
-            marketplace=listing.marketplace,
-            part_type=None,
-            budget=self.pc_builder_service.get_target_build().total_budget,
-        )
+        decision = self._analyse_marketplace_listing(listing)
 
         frame = Gtk.Frame()
         frame.add_css_class("deal-card")
@@ -1366,7 +1380,9 @@ class MainWindow(Gtk.ApplicationWindow):
         details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         details.set_hexpand(True)
 
-        meta_parts = [listing.marketplace, listing.price_label()]
+        part_type = infer_part_type(listing.title)
+
+        meta_parts = [listing.marketplace, listing.price_label(), f"Type: {part_type}"]
         if listing.seller_name:
             meta_parts.append(f"Seller: {listing.seller_name}")
         if listing.source_query:
@@ -1385,6 +1401,14 @@ class MainWindow(Gtk.ApplicationWindow):
         )
         scores.add_css_class("score-line")
         scores.set_wrap(True)
+
+        history = Gtk.Label(label=" | ".join(self._price_history_lines_for_title(listing.title)), xalign=0)
+        history.add_css_class("muted")
+        history.set_wrap(True)
+
+        compatibility = Gtk.Label(label=" | ".join(self._compatibility_lines_for_title(listing.title)), xalign=0)
+        compatibility.add_css_class("muted")
+        compatibility.set_wrap(True)
 
         reasoning_text = " | ".join(decision.reasoning[:3])
         reasoning = Gtk.Label(label=reasoning_text, xalign=0)
@@ -1416,6 +1440,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
         details.append(meta)
         details.append(scores)
+        details.append(history)
+        details.append(compatibility)
         details.append(reasoning)
         details.append(url_label)
         details.append(button_row)
@@ -1431,10 +1457,7 @@ class MainWindow(Gtk.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
 
-        decision = self.listing_intelligence_service.analyse_stored_listing(
-            listing,
-            budget=self.pc_builder_service.get_target_build().total_budget,
-        )
+        decision = self._analyse_stored_listing_with_history(listing)
 
         frame = Gtk.Frame()
         frame.add_css_class("deal-card")
@@ -1484,12 +1507,22 @@ class MainWindow(Gtk.ApplicationWindow):
         scores.add_css_class("score-line")
         scores.set_wrap(True)
 
+        history = Gtk.Label(label=" | ".join(self._price_history_lines_for_title(listing.title)), xalign=0)
+        history.add_css_class("muted")
+        history.set_wrap(True)
+
+        compatibility = Gtk.Label(label=" | ".join(self._compatibility_lines_for_title(listing.title)), xalign=0)
+        compatibility.add_css_class("muted")
+        compatibility.set_wrap(True)
+
         url_label = Gtk.Label(label=listing.url, xalign=0)
         url_label.add_css_class("muted")
         url_label.set_wrap(True)
 
         details.append(meta)
         details.append(scores)
+        details.append(history)
+        details.append(compatibility)
 
         if listing.notes:
             details.append(self._muted_label(f"Notes: {listing.notes}"))
@@ -1717,7 +1750,10 @@ class MainWindow(Gtk.ApplicationWindow):
         except AttributeError:
             pass
 
-        cached_path = self.image_cache.cached_path_for_url(image_url)
+        cached_path = None
+
+        if hasattr(self.image_cache, "cached_path_for_url"):
+            cached_path = self.image_cache.cached_path_for_url(image_url)
 
         if cached_path is not None:
             try:
@@ -1739,6 +1775,107 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.image_cache.fetch_async(image_url, apply_image)
         return frame
+
+
+    def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
+        self._live_render_signature = ""
+        self._refresh_live_results(force=True)
+
+    def _current_hardware_preference(self) -> str:
+        if hasattr(self, "hardware_preference_dropdown"):
+            return self._dropdown_text(self.hardware_preference_dropdown)
+
+        return "Best value / mixed"
+
+    def _effective_use_case(self) -> str:
+        return f"{self._current_use_case()} | {self._current_hardware_preference()}"
+
+    def _on_hardware_preference_changed(self, *_args) -> None:
+        preference = self._current_hardware_preference().lower()
+
+        if "intel cpu" in preference and hasattr(self, "target_platform_dropdown"):
+            self._set_dropdown_by_value(self.target_platform_dropdown, "Intel LGA1700 / DDR5")
+        elif ("amd cpu" in preference or "linux mint" in preference) and hasattr(self, "target_platform_dropdown"):
+            self._set_dropdown_by_value(self.target_platform_dropdown, "AM5 / ATX target")
+
+        self._on_target_input_changed()
+
+    def _analyse_marketplace_listing(self, listing: MarketplaceListing):
+        decision = self.listing_intelligence_service.analyse(
+            title=listing.title,
+            price=listing.price,
+            url=listing.url,
+            marketplace=listing.marketplace,
+            part_type=infer_part_type(listing.title),
+            budget=self.pc_builder_service.get_target_build().total_budget,
+        )
+        self._apply_price_history_to_decision(decision, listing.title, listing.price)
+        return decision
+
+    def _analyse_stored_listing_with_history(self, listing: StoredListing):
+        decision = self.listing_intelligence_service.analyse_stored_listing(
+            listing,
+            budget=self.pc_builder_service.get_target_build().total_budget,
+        )
+        self._apply_price_history_to_decision(decision, listing.title, listing.price)
+        return decision
+
+    def _apply_price_history_to_decision(self, decision, title: str, price: float | None) -> None:
+        if price is None:
+            return
+
+        stats = self.price_history_service.stats_for_title(title)
+
+        if stats is None or stats.sample_count < 2 or stats.average_price <= 0:
+            return
+
+        if price <= stats.lowest_price:
+            decision.deal_score = min(100, decision.deal_score + 12)
+            decision.urgency_score = min(100, decision.urgency_score + 10)
+            decision.reasoning.insert(0, "Phase 6 history: this is at or below the lowest observed DealWise price.")
+        elif price <= stats.average_price * 0.90:
+            decision.deal_score = min(100, decision.deal_score + 8)
+            decision.reasoning.insert(0, "Phase 6 history: this is below the observed average price.")
+        elif price >= stats.average_price * 1.15:
+            decision.deal_score = max(0, decision.deal_score - 10)
+            decision.reasoning.insert(0, "Phase 6 history: this is above the observed average price.")
+
+        decision.decision = self.listing_intelligence_service._choose_decision(
+            deal_score=decision.deal_score,
+            scam_risk=decision.scam_risk,
+            budget_fit=decision.budget_fit,
+            evidence_confidence=decision.evidence_confidence,
+        )
+
+    def _price_history_lines_for_title(self, title: str) -> list[str]:
+        stats = self.price_history_service.stats_for_title(title)
+
+        if stats is None or stats.sample_count < 2:
+            return ["Price History: learning from seen listings. More samples needed."]
+
+        return [
+            f"Price History: {stats.sample_count} sample(s)",
+            f"Observed Range: {stats.range_label()}",
+            f"Observed Average: {stats.average_label()}",
+        ]
+
+    def _historical_price_rank(self, title: str, price: float | None) -> float:
+        if price is None:
+            return 0
+
+        stats = self.price_history_service.stats_for_title(title)
+
+        if stats is None or stats.average_price <= 0:
+            return 0
+
+        return max(0, stats.average_price - price)
+
+    def _compatibility_lines_for_title(self, title: str) -> list[str]:
+        return self.compatibility_service.listing_notes(
+            title,
+            self._current_build_path(),
+            self._current_hardware_preference(),
+        )
 
     def _current_use_case(self) -> str:
         if hasattr(self, "target_use_case_dropdown"):
@@ -1823,6 +1960,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_live_results(force=True)
 
     def _filter_and_sort_live_results(self, results: list[MarketplaceListing]) -> list[MarketplaceListing]:
+        search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""
         focus = self._dropdown_text(self.live_focus_dropdown) if hasattr(self, "live_focus_dropdown") else "All Live Deals"
         part_filter = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
         priority_mode = self._dropdown_text(self.live_priority_dropdown) if hasattr(self, "live_priority_dropdown") else "Best overall first"
@@ -1830,14 +1968,24 @@ class MainWindow(Gtk.ApplicationWindow):
         max_price = self.live_max_price_input.get_value() if hasattr(self, "live_max_price_input") else 0
         hide_high_scam = self.live_hide_high_scam_check.get_active() if hasattr(self, "live_hide_high_scam_check") else False
 
-        scored: list[tuple[MarketplaceListing, object, str, bool]] = []
+        scored: list[tuple[MarketplaceListing, object, str, bool, float]] = []
 
         for listing in results:
             inferred_part = infer_part_type(listing.title)
-            is_full_pc = self._is_full_pc_listing(listing.title)
+            is_full_pc = inferred_part == "Full PC"
 
-            if is_full_pc:
-                inferred_part = "Full PC"
+            haystack = " ".join(
+                [
+                    listing.title,
+                    listing.marketplace,
+                    listing.seller_name or "",
+                    listing.source_query or "",
+                    inferred_part,
+                ]
+            ).lower()
+
+            if search_text and search_text not in haystack:
+                continue
 
             if focus == "Checklist Matches Only" and not self._listing_matches_needed_parts(listing):
                 continue
@@ -1848,22 +1996,16 @@ class MainWindow(Gtk.ApplicationWindow):
             if max_price > 0 and listing.price is not None and listing.price > max_price:
                 continue
 
-            decision = self.listing_intelligence_service.analyse(
-                title=listing.title,
-                price=listing.price,
-                url=listing.url,
-                marketplace=listing.marketplace,
-                part_type=inferred_part,
-                budget=self.pc_builder_service.get_target_build().total_budget,
-            )
+            decision = self._analyse_marketplace_listing(listing)
 
             if hide_high_scam and decision.scam_risk >= 6:
                 continue
 
-            scored.append((listing, decision, inferred_part, is_full_pc))
+            history_score = self._historical_price_rank(listing.title, listing.price)
+            scored.append((listing, decision, inferred_part, is_full_pc, history_score))
 
         def price_value(item):
-            listing, _decision, _part, _is_full_pc = item
+            listing, _decision, _part, _is_full_pc, _history_score = item
             return listing.price if listing.price is not None else 999999
 
         if sort_mode == "Lowest Price":
@@ -1878,6 +2020,8 @@ class MainWindow(Gtk.ApplicationWindow):
             scored.sort(key=lambda item: item[1].build_fit, reverse=True)
         elif sort_mode == "Highest Evidence Confidence":
             scored.sort(key=lambda item: item[1].evidence_confidence, reverse=True)
+        elif sort_mode == "Lowest Historical Price":
+            scored.sort(key=lambda item: item[4], reverse=True)
         else:
             scored.sort(key=lambda item: item[0].found_at, reverse=True)
 
@@ -1907,8 +2051,6 @@ class MainWindow(Gtk.ApplicationWindow):
         return any(term in lower for term in full_pc_terms)
 
     def _live_signature(self, status: str, favourites: list[StoredListing], results: list[MarketplaceListing]) -> str:
-        # Do not include connector status here. Status changes every refresh and
-        # caused full list redraws, which made thumbnails disappear/reappear.
         filter_state = []
 
         for attr in [
@@ -1919,6 +2061,9 @@ class MainWindow(Gtk.ApplicationWindow):
         ]:
             if hasattr(self, attr):
                 filter_state.append(self._dropdown_text(getattr(self, attr)))
+
+        if hasattr(self, "live_search_entry"):
+            filter_state.append(self.live_search_entry.get_text().strip())
 
         if hasattr(self, "live_max_price_input"):
             filter_state.append(str(self.live_max_price_input.get_value()))

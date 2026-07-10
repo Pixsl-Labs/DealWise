@@ -7,6 +7,7 @@ from typing import Iterable
 
 from dealwise.data.database import DatabaseManager
 from dealwise.models import MarketplaceListing
+from dealwise.services.price_history import normalise_product_key
 
 
 @dataclass(slots=True)
@@ -126,7 +127,8 @@ class ListingRepository:
                             source_query = ?,
                             search_id = ?,
                             found_at = ?,
-                            last_seen_at = ?
+                            last_seen_at = ?,
+                            part_type = ?
                         WHERE dedupe_key = ?
                         """,
                         (
@@ -142,14 +144,54 @@ class ListingRepository:
                             listing.search_id,
                             listing.found_at,
                             now,
+                            infer_part_type(listing.title),
                             listing.dedupe_key,
                         ),
                     )
                     updated += 1
 
+                self._record_price_snapshot(connection, listing, now)
+
             connection.commit()
 
         return inserted, updated
+
+    def _record_price_snapshot(
+        self,
+        connection,
+        listing: MarketplaceListing,
+        captured_at: str,
+    ) -> None:
+        if listing.price is None:
+            return
+
+        connection.execute(
+            """
+            INSERT INTO price_snapshots (
+                dedupe_key,
+                product_key,
+                marketplace,
+                listing_id,
+                title,
+                price,
+                currency,
+                url,
+                captured_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                listing.dedupe_key,
+                normalise_product_key(listing.title),
+                listing.marketplace,
+                listing.id,
+                listing.title,
+                listing.price,
+                listing.currency,
+                listing.url,
+                captured_at,
+            ),
+        )
 
     def add_manual_listing(
         self,
@@ -207,6 +249,35 @@ class ListingRepository:
                     part_type or infer_part_type(safe_title),
                 ),
             )
+
+            if price is not None:
+                connection.execute(
+                    """
+                    INSERT INTO price_snapshots (
+                        dedupe_key,
+                        product_key,
+                        marketplace,
+                        listing_id,
+                        title,
+                        price,
+                        currency,
+                        url,
+                        captured_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'GBP', ?, ?)
+                    """,
+                    (
+                        dedupe_key,
+                        normalise_product_key(safe_title),
+                        safe_marketplace,
+                        dedupe_key,
+                        safe_title,
+                        price,
+                        safe_url,
+                        now,
+                    ),
+                )
+
             connection.commit()
 
         return self.get_listing(dedupe_key)
@@ -298,6 +369,19 @@ class ListingRepository:
 def infer_part_type(title: str) -> str:
     lower = title.lower()
 
+    full_pc_terms = [
+        "gaming pc",
+        "desktop pc",
+        "full pc",
+        "complete pc",
+        "computer tower",
+        "gaming computer",
+        "custom pc",
+        "prebuilt",
+        "workstation",
+        "dell precision",
+        "pc bundle",
+    ]
     gpu_terms = ["rtx", "gtx", "rx ", "radeon", "geforce", "graphics card", "gpu"]
     cpu_terms = ["ryzen", "intel core", "i3-", "i5-", "i7-", "i9-", "cpu", "processor"]
     motherboard_terms = ["b650", "x670", "b550", "x570", "z690", "z790", "motherboard"]
@@ -307,6 +391,8 @@ def infer_part_type(title: str) -> str:
     case_terms = ["case", "tower", "fractal", "nzxt", "corsair 4000d"]
     cooling_terms = ["cooler", "aio", "fan", "heatsink"]
 
+    if any(term in lower for term in full_pc_terms):
+        return "Full PC"
     if any(term in lower for term in gpu_terms):
         return "GPU"
     if any(term in lower for term in cpu_terms):

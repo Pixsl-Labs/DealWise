@@ -87,6 +87,28 @@ class DatabaseManager:
                     body TEXT NOT NULL,
                     related_listing_key TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS price_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dedupe_key TEXT NOT NULL,
+                    product_key TEXT NOT NULL,
+                    marketplace TEXT NOT NULL,
+                    listing_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    currency TEXT NOT NULL DEFAULT 'GBP',
+                    url TEXT NOT NULL,
+                    captured_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_price_snapshots_product_key
+                ON price_snapshots(product_key);
+
+                CREATE INDEX IF NOT EXISTS idx_price_snapshots_dedupe_key
+                ON price_snapshots(dedupe_key);
+
+                CREATE INDEX IF NOT EXISTS idx_price_snapshots_captured_at
+                ON price_snapshots(captured_at);
                 """
             )
 
@@ -103,19 +125,6 @@ class DatabaseManager:
             self._ensure_column(connection, "listings", "notes", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "listings", "part_type", "TEXT NOT NULL DEFAULT 'Unknown'")
             self._ensure_column(connection, "listings", "raw_json", "TEXT NOT NULL DEFAULT '{}'")
-
-            self._ensure_column(connection, "target_build", "name", "TEXT NOT NULL DEFAULT 'Main Target Build'")
-            self._ensure_column(connection, "target_build", "total_budget", "REAL NOT NULL DEFAULT 600")
-            self._ensure_column(connection, "target_build", "use_case", "TEXT NOT NULL DEFAULT '1440p gaming / best performance per pound'")
-            self._ensure_column(connection, "target_build", "platform", "TEXT NOT NULL DEFAULT 'AM5 / ATX target'")
-            self._ensure_column(connection, "target_build", "notes", "TEXT NOT NULL DEFAULT 'Prioritise GPU deal first, then CPU, motherboard and RAM.'")
-
-            self._ensure_column(connection, "build_parts", "target", "TEXT NOT NULL DEFAULT ''")
-            self._ensure_column(connection, "build_parts", "budget", "REAL NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "build_parts", "bought_price", "REAL NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "build_parts", "status", "TEXT NOT NULL DEFAULT 'Needed'")
-            self._ensure_column(connection, "build_parts", "priority", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "build_parts", "notes", "TEXT NOT NULL DEFAULT ''")
 
             self._ensure_default_target_build(connection)
             self._ensure_default_build_parts(connection)

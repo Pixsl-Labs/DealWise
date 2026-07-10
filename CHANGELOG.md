@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.0] - 2026-07-10
+
+### Added
+
+- Phase 6 price history storage using observed marketplace listing snapshots.
+- Price history lines on live and saved listing cards.
+- Deal score adjustment using observed DealWise price history.
+- Live Deals search box.
+- Live Deals Apply Filters button.
+- Full PC / PC parts priority sorting.
+- Rule-based compatibility service for CPU, motherboard, RAM, PSU, GPU, case and Linux Mint GPU preference.
+- Selected parts compatibility card in PC Builder.
+- Listing-level compatibility notes.
+
+### Fixed
+
+- Added safer startup fatal logging.
+- Added SQLite migrations for price history and older local databases.
+- Reduced image flicker by avoiding connector-status-only row rebuilds.
+
+### Notes
+
+- README intentionally not changed.
+- Phase 6 learns from listings DealWise has seen. Completed-sales marketplace history is still future work.
+
 ## [0.4.5] - 2026-07-10
 
 ### Added

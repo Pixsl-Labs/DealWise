@@ -22,8 +22,7 @@ class ListingDecision:
 class ListingIntelligenceService:
     """Explainable local listing scoring.
 
-    This is still not real price-history scoring, but it now varies by detected
-    part, rough UK used-market ranges, price, and risk terms.
+    Phase 6 can now adjust these scores further using stored observed prices.
     """
 
     def analyse(
@@ -186,6 +185,7 @@ class ListingIntelligenceService:
             (r"2\s*tb.*nvme|nvme.*2\s*tb", 70, 115, "2TB NVMe"),
             (r"650\s*w.*gold|650w.*gold", 55, 90, "650W Gold PSU"),
             (r"750\s*w.*gold|750w.*gold", 75, 120, "750W Gold PSU"),
+            (r"gaming\s*pc|desktop\s*pc|full\s*pc|complete\s*pc|prebuilt", 250, 900, "Full PC"),
         ]
 
         for pattern, low, high, label in ranges:
@@ -201,6 +201,7 @@ class ListingIntelligenceService:
             "PSU": (40, 120, "Generic PSU"),
             "Case": (35, 110, "Generic case"),
             "Cooling": (20, 90, "Generic cooling"),
+            "Full PC": (250, 900, "Generic full PC"),
         }
 
         low, high, label = fallback.get(part_type, (0, 0, ""))
@@ -243,19 +244,14 @@ class ListingIntelligenceService:
     ) -> str:
         if scam_risk >= 7:
             return "AVOID"
-
         if deal_score >= 82 and budget_fit >= 70 and scam_risk <= 4:
             return "BUY NOW"
-
         if deal_score >= 68 and scam_risk <= 5:
             return "WATCH"
-
         if evidence_confidence < 45:
             return "NEGOTIATE"
-
         if deal_score < 48:
             return "WAIT"
-
         return "WATCH"
 
 
