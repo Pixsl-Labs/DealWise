@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.5] - 2026-07-11
+
+### Fixed
+
+- Fixed Live Deals refresh crash caused by undefined `stored_score_button` inside live listing rows.
+- Live listing cards now append only their own `score_button`.
+- Stored listing cards now correctly append `stored_score_button`.
+
+### Notes
+
+- README intentionally not changed.
+
 ## [0.7.1] - 2026-07-11
 
 ### Fixed

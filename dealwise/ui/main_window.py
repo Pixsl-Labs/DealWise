@@ -1785,7 +1785,6 @@ class MainWindow(Gtk.ApplicationWindow):
         button_row.append(remove_button)
         button_row.append(open_button)
         button_row.append(image_button)
-        button_row.append(stored_score_button)
         button_row.append(score_button)
 
         details.append(meta)
@@ -1920,6 +1919,7 @@ class MainWindow(Gtk.ApplicationWindow):
         button_row.append(remove_button)
         button_row.append(open_button)
         button_row.append(image_button)
+        button_row.append(stored_score_button)
 
         details.append(button_row)
 
