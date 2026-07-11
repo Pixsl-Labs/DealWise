@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.5] - 2026-07-11
+
+### Added
+
+- Live Deals Search This Text one-off Vinted search.
+- Buying Candidate status for PC Builder checklist parts.
+- Phase 7 readiness document.
+- Dashboard Phase 7 readiness note.
+
+### Fixed
+
+- Listing Checker now uses seller notes/chat text for buyer evidence risk flags.
+- Current PC RAM capacity parsing now handles decimal GiB values such as 31.23 GiB.
+- Full PC detection now catches terms such as gaming tower, tower PC and PC Specialist.
+- Search Needed Parts now excludes more non-PC junk terms.
+- Build Cost Overview separates Needed, Buying Candidate, Search Paused and Bought parts.
+
+### Notes
+
+- README intentionally not changed.
+- This is the recommended quality pass before starting Phase 7 connectors.
+
 ## [0.6.4] - 2026-07-11
 
 ### Added

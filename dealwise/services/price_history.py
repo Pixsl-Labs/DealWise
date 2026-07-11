@@ -42,6 +42,11 @@ def normalise_product_key(title: str) -> str:
         "gaming computer",
         "workstation",
         "pc bundle",
+        "gaming tower pc",
+        "desktop tower",
+        "pc specialist",
+        "tower pc",
+        "gaming tower",
     ]
 
     if any(term in lower for term in full_pc_terms):

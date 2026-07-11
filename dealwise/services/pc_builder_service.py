@@ -470,17 +470,40 @@ class PCBuilderService:
         return 20, 50, "Base system estimate: generic case/motherboard/PSU allowance added."
 
     def _extract_memory_capacity_gb(self, text: str) -> int:
-        matches = re.findall(r"(\d+)\s*(?:gib|gb)", text, flags=re.IGNORECASE)
+        total_match = re.search(
+            r"total:\s*([\d.]+)\s*(gib|gb|mib|mb)",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if total_match:
+            value = float(total_match.group(1))
+            unit = total_match.group(2).lower()
+
+            if unit in {"mib", "mb"}:
+                value = value / 1024
+
+            return int(round(value))
+
+        matches = re.findall(r"([\d.]+)\s*(gib|gb|mib|mb)", text, flags=re.IGNORECASE)
 
         if not matches:
             return 0
 
-        numbers = [int(match) for match in matches]
+        values: list[float] = []
 
-        if not numbers:
+        for raw_value, unit in matches:
+            value = float(raw_value)
+
+            if unit.lower() in {"mib", "mb"}:
+                value = value / 1024
+
+            values.append(value)
+
+        if not values:
             return 0
 
-        return max(numbers)
+        return int(round(max(values)))
 
     def _valuation_confidence(self, text: str) -> str:
         signals = 0

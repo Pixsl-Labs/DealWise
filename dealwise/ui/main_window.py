@@ -386,6 +386,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "PC Builder can import current PC information with inxi -Fx.",
                 "Listing Checker can create manual listings and generate seller messages.",
                 "Deal scoring now combines rough market ranges, local price history, compatibility notes and buyer-evidence checks.",
+                "Phase 7 is ready to start with one read-only connector at a time, beginning with eBay or CeX.",
             ],
         )
         section.set_margin_top(18)
@@ -619,6 +620,9 @@ class MainWindow(Gtk.ApplicationWindow):
         clear_filters_button = Gtk.Button(label="Clear Filters")
         clear_filters_button.connect("clicked", self._on_clear_live_filters_clicked)
 
+        search_text_button = Gtk.Button(label="Search This Text")
+        search_text_button.connect("clicked", self._on_search_live_text_clicked)
+
         filter_grid.attach(self._form_label("Search"), 0, 0, 1, 1)
         filter_grid.attach(self.live_search_entry, 1, 0, 3, 1)
         filter_grid.attach(self._form_label("Focus"), 0, 1, 1, 1)
@@ -636,6 +640,7 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.attach(self.live_hide_high_scam_check, 1, 4, 1, 1)
         filter_grid.attach(apply_filters_button, 2, 4, 1, 1)
         filter_grid.attach(clear_filters_button, 3, 4, 1, 1)
+        filter_grid.attach(search_text_button, 1, 5, 3, 1)
 
         filter_card.set_child(filter_grid)
         filter_expander.set_child(filter_card)
@@ -876,7 +881,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading(title))
         page.append(
             self._muted_label(
-                "This page is reserved for a planned feature. Phase 3 focuses on SQLite, saved listings, PC Builder, and listing intelligence foundations."
+                "This page is reserved for a planned feature. Current focus is Phase 6 quality, price history, compatibility, buyer evidence checks, and Phase 7 connector readiness."
             )
         )
         return self._scroll(page)
@@ -1355,7 +1360,9 @@ class MainWindow(Gtk.ApplicationWindow):
         selected_hardware_preference = self._current_hardware_preference()
 
         bought_count = sum(1 for part in parts if part.status == "Bought")
-        needed_count = sum(1 for part in parts if part.status != "Bought")
+        needed_count = sum(1 for part in parts if part.status == "Needed")
+        candidate_count = sum(1 for part in parts if part.status in {"Buying Candidate", "Evidence Requested"})
+        paused_count = sum(1 for part in parts if part.status in {"Stop Searching", "Upgrade Later", "Not Looking"})
         cost_low, cost_high = self.pc_builder_service.estimate_build_cost(selected_build_path)
         remaining_low = selected_budget - cost_high
         remaining_high = selected_budget - cost_low
@@ -1423,6 +1430,8 @@ class MainWindow(Gtk.ApplicationWindow):
                     ("Budget Remaining After Low Estimate", f"£{remaining_high:.0f}"),
                     ("Budget Remaining After High Estimate", f"£{remaining_low:.0f}"),
                     ("Bought Parts", str(bought_count)),
+                    ("Buying Candidates", str(candidate_count)),
+                    ("Search Paused", str(paused_count)),
                     ("Still Needed", str(needed_count)),
                     ("Budget Warning", "High estimate is above budget." if remaining_low < 0 else "Current selected parts fit within budget range."),
                 ],
@@ -1790,6 +1799,9 @@ class MainWindow(Gtk.ApplicationWindow):
         bought_button = Gtk.Button(label="Bought")
         bought_button.connect("clicked", self._on_part_status_clicked, part.id, "Bought")
 
+        candidate_button = Gtk.Button(label="Candidate")
+        candidate_button.connect("clicked", self._on_part_status_clicked, part.id, "Buying Candidate")
+
         later_button = Gtk.Button(label="Later")
         later_button.connect("clicked", self._on_part_status_clicked, part.id, "Upgrade Later")
 
@@ -1801,6 +1813,7 @@ class MainWindow(Gtk.ApplicationWindow):
         top.append(use_button)
         top.append(needed_button)
         top.append(bought_button)
+        top.append(candidate_button)
         top.append(later_button)
         top.append(stop_search_button)
 
@@ -1847,7 +1860,19 @@ class MainWindow(Gtk.ApplicationWindow):
                 min_price=None,
                 max_price=None,
                 condition="Any",
-                excluded_keywords=["broken", "faulty", "wanted"],
+                excluded_keywords=[
+                    "broken",
+                    "faulty",
+                    "wanted",
+                    "laptop",
+                    "notebook",
+                    "zenbook",
+                    "macbook",
+                    "ipad",
+                    "tablet",
+                    "camera",
+                    "airpods",
+                ],
                 refresh_interval_minutes=5,
             )
             self.config_manager.add_saved_search(search)
@@ -1957,6 +1982,49 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_product_dropdown.set_model(Gtk.StringList.new(options))
         self.live_product_dropdown.set_selected(0)
+
+    def _on_search_live_text_clicked(self, _button: Gtk.Button) -> None:
+        if not hasattr(self, "live_search_entry"):
+            return
+
+        query = self.live_search_entry.get_text().strip()
+
+        if not query:
+            if hasattr(self, "live_status_label"):
+                self.live_status_label.set_text("Type something in Live Deals search first.")
+            return
+
+        search = SavedSearch.create(
+            query=query,
+            marketplace="Vinted",
+            min_price=None,
+            max_price=self._price_or_none(self.live_max_price_input.get_value()) if hasattr(self, "live_max_price_input") else None,
+            condition="Any",
+            excluded_keywords=[
+                "broken",
+                "faulty",
+                "wanted",
+                "laptop",
+                "notebook",
+                "zenbook",
+                "macbook",
+                "ipad",
+                "tablet",
+                "camera",
+                "airpods",
+            ],
+            refresh_interval_minutes=5,
+        )
+
+        started = self.search_manager.refresh_search(search, manual=True)
+
+        if hasattr(self, "live_status_label"):
+            if started:
+                self.live_status_label.set_text(f"Searching Vinted once for: {query}")
+            else:
+                self.live_status_label.set_text("Search could not start. Check cooldown or connector status.")
+
+        self._refresh_runtime_stats()
 
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""
@@ -2174,6 +2242,49 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_product_dropdown.set_model(Gtk.StringList.new(options))
         self.live_product_dropdown.set_selected(0)
+
+    def _on_search_live_text_clicked(self, _button: Gtk.Button) -> None:
+        if not hasattr(self, "live_search_entry"):
+            return
+
+        query = self.live_search_entry.get_text().strip()
+
+        if not query:
+            if hasattr(self, "live_status_label"):
+                self.live_status_label.set_text("Type something in Live Deals search first.")
+            return
+
+        search = SavedSearch.create(
+            query=query,
+            marketplace="Vinted",
+            min_price=None,
+            max_price=self._price_or_none(self.live_max_price_input.get_value()) if hasattr(self, "live_max_price_input") else None,
+            condition="Any",
+            excluded_keywords=[
+                "broken",
+                "faulty",
+                "wanted",
+                "laptop",
+                "notebook",
+                "zenbook",
+                "macbook",
+                "ipad",
+                "tablet",
+                "camera",
+                "airpods",
+            ],
+            refresh_interval_minutes=5,
+        )
+
+        started = self.search_manager.refresh_search(search, manual=True)
+
+        if hasattr(self, "live_status_label"):
+            if started:
+                self.live_status_label.set_text(f"Searching Vinted once for: {query}")
+            else:
+                self.live_status_label.set_text("Search could not start. Check cooldown or connector status.")
+
+        self._refresh_runtime_stats()
 
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
         self._live_render_signature = ""

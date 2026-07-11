@@ -381,6 +381,11 @@ def infer_part_type(title: str) -> str:
         "workstation",
         "dell precision",
         "pc bundle",
+        "gaming tower pc",
+        "desktop tower",
+        "pc specialist",
+        "tower pc",
+        "gaming tower",
     ]
     gpu_terms = ["rtx", "gtx", "rx ", "radeon", "geforce", "graphics card", "gpu"]
     cpu_terms = ["ryzen", "intel core", "i3-", "i5-", "i7-", "i9-", "cpu", "processor"]

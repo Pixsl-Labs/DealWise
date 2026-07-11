@@ -189,6 +189,14 @@ class SearchManager:
             "macbook",
             "chromebook",
             "surface laptop",
+            "nike",
+            "fitness",
+            "resistance band",
+            "headphones",
+            "airpod",
+            "camera",
+            "tablet",
+            "ipad",
         ]
 
         for listing in listings:

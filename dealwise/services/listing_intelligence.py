@@ -82,11 +82,12 @@ class ListingIntelligenceService:
         marketplace: str,
         part_type: str | None = None,
         budget: float | None = None,
+        notes: str = "",
     ) -> ListingDecision:
         safe_part_type = part_type or infer_part_type(title)
         lower_title = title.lower()
         reasoning: list[str] = []
-        buyer_flags = buyer_risk_flags(title)
+        buyer_flags = buyer_risk_flags(f"{title} {notes}")
 
         expected_low, expected_high, matched_model = self._expected_price_range(lower_title, safe_part_type)
 
@@ -215,6 +216,7 @@ class ListingIntelligenceService:
             marketplace=listing.marketplace,
             part_type=listing.part_type,
             budget=budget,
+            notes=listing.notes,
         )
 
     def _expected_price_range(self, title: str, part_type: str) -> tuple[int, int, str]:
@@ -229,8 +231,8 @@ class ListingIntelligenceService:
             (r"rtx\s*4070", 390, 500, "RTX 4070"),
             (r"ryzen\s*5\s*7600", 130, 170, "Ryzen 5 7600"),
             (r"ryzen\s*7\s*7700", 150, 200, "Ryzen 7 7700"),
-            (r"7800x3d", 270, 350, "Ryzen 7 7800X3D"),
-            (r"ryzen\s*9\s*7900x?", 250, 370, "Ryzen 9 7900/7900X"),
+            (r"7800x3d", 230, 300, "Ryzen 7 7800X3D"),
+            (r"ryzen\s*9\s*7900x?", 200, 280, "Ryzen 9 7900/7900X"),
             (r"i5\s*-?\s*12600k", 120, 170, "Intel i5-12600K"),
             (r"i5\s*-?\s*13600k", 190, 260, "Intel i5-13600K"),
             (r"i7\s*-?\s*13700k", 240, 330, "Intel i7-13700K"),
@@ -300,6 +302,8 @@ class ListingIntelligenceService:
     ) -> str:
         if scam_risk >= 7:
             return "AVOID"
+        if evidence_confidence < 35:
+            return "EVIDENCE REQUIRED"
         if deal_score >= 82 and budget_fit >= 70 and scam_risk <= 4:
             return "BUY NOW"
         if deal_score >= 68 and scam_risk <= 5:
