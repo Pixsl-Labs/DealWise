@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import webbrowser
@@ -19,6 +20,7 @@ from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
 from dealwise.services.price_history import PriceHistoryService
 from dealwise.services.compatibility_service import CompatibilityService
+from dealwise.services.build_import import BuildImportService, BuildImportResult
 
 
 HARDWARE_PREFERENCE_OPTIONS = [
@@ -218,6 +220,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.image_cache = ImageCacheService(self.config_manager.cache_dir / "listing-images")
         self.price_history_service = PriceHistoryService(self.pc_builder_service.database)
         self.compatibility_service = CompatibilityService()
+        self.build_import_service = BuildImportService(self.pc_builder_service)
         self._live_render_signature = ""
         self._pc_builder_refresh_timer_id: int | None = None
 
@@ -352,7 +355,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("Dashboard"))
         page.append(
             self._muted_label(
-                "Phase 6 is active: saved listings, PC Builder, compatibility checks, buyer evidence checks, price history learning, and marketplace deal scoring."
+                "Polish + Build Import phase is active: real-time PC Builder updates, hidden deals, build import, build export, price history scoring and compatibility checks."
             )
         )
 
@@ -386,7 +389,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "PC Builder can import current PC information with inxi -Fx.",
                 "Listing Checker can create manual listings and generate seller messages.",
                 "Deal scoring now combines rough market ranges, local price history, compatibility notes and buyer-evidence checks.",
-                "Phase 7 is ready to start with one read-only connector at a time, beginning with eBay or CeX.",
+                "Phase 7 is paused until this polish pass feels smooth enough for daily use.",
             ],
         )
         section.set_margin_top(18)
@@ -408,6 +411,9 @@ class MainWindow(Gtk.ApplicationWindow):
         import_button = Gtk.Button(label="Import Current PC")
         import_button.connect("clicked", self._on_import_pc_clicked)
 
+        import_build_button = Gtk.Button(label="Import Build List")
+        import_build_button.connect("clicked", self._on_import_build_clicked)
+
         clear_pc_button = Gtk.Button(label="Clear Saved PC")
         clear_pc_button.connect("clicked", self._on_clear_current_pc_clicked)
 
@@ -421,11 +427,24 @@ class MainWindow(Gtk.ApplicationWindow):
         save_target_button = Gtk.Button(label="Save Target Build")
         save_target_button.connect("clicked", self._on_save_target_build_clicked)
 
+        copy_summary_button = Gtk.Button(label="Copy Summary")
+        copy_summary_button.connect("clicked", self._on_copy_build_summary_clicked)
+
+        export_md_button = Gtk.Button(label="Export MD")
+        export_md_button.connect("clicked", self._on_export_build_markdown_clicked)
+
+        export_json_button = Gtk.Button(label="Export JSON")
+        export_json_button.connect("clicked", self._on_export_build_json_clicked)
+
         top_actions.append(import_button)
+        top_actions.append(import_build_button)
         top_actions.append(clear_pc_button)
         top_actions.append(apply_button)
         top_actions.append(search_parts_button)
         top_actions.append(save_target_button)
+        top_actions.append(copy_summary_button)
+        top_actions.append(export_md_button)
+        top_actions.append(export_json_button)
         page.append(top_actions)
 
         self.pc_summary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -580,10 +599,12 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_search_entry = Gtk.Entry()
         self.live_search_entry.set_placeholder_text("Search shown deals, e.g. RX 6800, Ryzen 7700, full PC")
+        self.live_search_entry.connect("changed", self._on_live_filter_debounced)
 
         self.live_focus_dropdown = Gtk.DropDown.new_from_strings(
             ["All Live Deals", "Checklist Matches Only"]
         )
+        self.live_focus_dropdown.connect("notify::selected", self._on_live_filter_debounced)
 
         self.live_part_dropdown = Gtk.DropDown.new_from_strings(
             ["All Parts", "Full PC", "CPU", "GPU", "Motherboard", "RAM", "Storage", "PSU", "Case", "Cooling", "Unknown"]
@@ -591,8 +612,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_part_dropdown.connect("notify::selected", self._on_live_part_filter_changed)
 
         self.live_product_dropdown = Gtk.DropDown.new_from_strings(LIVE_PRODUCT_FILTERS["All Parts"])
+        self.live_product_dropdown.connect("notify::selected", self._on_live_filter_debounced)
 
         self.live_priority_dropdown = Gtk.DropDown.new_from_strings(LIVE_PRIORITY_OPTIONS)
+        self.live_priority_dropdown.connect("notify::selected", self._on_live_filter_debounced)
         self.live_priority_dropdown.set_selected(1)
 
         self.live_sort_dropdown = Gtk.DropDown.new_from_strings(
@@ -610,8 +633,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_max_price_input = Gtk.SpinButton.new_with_range(0, 100000, 5)
         self.live_max_price_input.set_tooltip_text("0 means no max price filter")
+        self.live_max_price_input.connect("value-changed", self._on_live_filter_debounced)
 
         self.live_hide_high_scam_check = Gtk.CheckButton(label="Hide high scam risk")
+        self.live_hide_high_scam_check.connect("toggled", self._on_live_filter_debounced)
 
         apply_filters_button = Gtk.Button(label="Apply Filters")
         apply_filters_button.add_css_class("suggested-action")
@@ -668,6 +693,15 @@ class MainWindow(Gtk.ApplicationWindow):
         self.worth_live_list.add_css_class("saved-search-list")
         self.worth_live_expander.set_child(self.worth_live_list)
         page.append(self.worth_live_expander)
+
+        self.hidden_live_expander = Gtk.Expander(label="Hidden Deals")
+        self.hidden_live_expander.set_expanded(False)
+        self.hidden_live_expander.set_margin_top(16)
+
+        self.hidden_live_list = Gtk.ListBox()
+        self.hidden_live_list.add_css_class("saved-search-list")
+        self.hidden_live_expander.set_child(self.hidden_live_list)
+        page.append(self.hidden_live_expander)
 
         return self._scroll(page)
 
@@ -903,10 +937,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_remove_live_listing_clicked(self, _button: Gtk.Button, listing: MarketplaceListing) -> None:
         self.search_manager.hide_live_listing(listing.dedupe_key)
-        self.listing_repository.delete_listing(listing.dedupe_key)
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
-        self._refresh_persistent_listings()
         self._refresh_runtime_stats()
 
     def _on_delete_stored_listing_clicked(self, _button: Gtk.Button, dedupe_key: str) -> None:
@@ -1280,14 +1312,15 @@ class MainWindow(Gtk.ApplicationWindow):
         stats = self.search_manager.get_stats()
         favourites = self._filter_stored_live_results(self.listing_repository.list_favourites(limit=25))
         results = self.search_manager.get_live_results(limit=150)
+        hidden_results = self.search_manager.get_hidden_results(limit=100) if hasattr(self.search_manager, "get_hidden_results") else []
         filtered_results = self._filter_and_sort_live_results(results)
 
         if hasattr(self, "live_status_label"):
             self.live_status_label.set_text(
-                f"{stats.connector_status} Showing {len(filtered_results)} filtered result(s)."
+                f"{stats.connector_status} Showing {len(filtered_results)} filtered result(s). Hidden: {len(hidden_results)}."
             )
 
-        signature = self._live_signature("", favourites, filtered_results)
+        signature = self._live_signature("", favourites, filtered_results) + "|hidden=" + ",".join(item.dedupe_key for item in hidden_results)
 
         if not force and signature == self._live_render_signature:
             return True
@@ -1296,6 +1329,14 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._clear_listbox(self.worth_live_list)
         self._clear_listbox(self.saved_live_list)
+
+        if hasattr(self, "hidden_live_list"):
+            self._clear_listbox(self.hidden_live_list)
+            if hidden_results:
+                for listing in hidden_results:
+                    self.hidden_live_list.append(self._hidden_listing_row(listing))
+            else:
+                self.hidden_live_list.append(self._simple_row("No hidden deals. Removed live deals will appear here so they can be restored."))
 
         if not favourites:
             self.saved_live_list.append(
@@ -1439,6 +1480,19 @@ class MainWindow(Gtk.ApplicationWindow):
             )
         )
 
+        progress_lines = []
+        for part in parts:
+            marker = "✓" if part.status == "Bought" else ("◐" if part.status in {"Buying Candidate", "Evidence Requested"} else "□")
+            progress_lines.append(f"{marker} {part.part_type}: {part.target} — {part.status}")
+
+        if progress_lines:
+            self.pc_summary_box.append(
+                self._section_card(
+                    "Wishlist Progress",
+                    progress_lines,
+                )
+            )
+
         if hasattr(self, "compatibility_box"):
             self.compatibility_box.append(
                 self._section_card(
@@ -1466,6 +1520,28 @@ class MainWindow(Gtk.ApplicationWindow):
                     [
                         "Search Needed Parts will create or refresh Vinted searches for:",
                         *[f"- {query}" for query in search_queries],
+                    ],
+                )
+            )
+
+            self.compatibility_box.append(
+                self._section_card(
+                    "Search Builder",
+                    [
+                        "Search Terms:",
+                        *[f"- {query}" for query in search_queries],
+                        "",
+                        "Negative Keywords:",
+                        "- broken",
+                        "- faulty",
+                        "- spares",
+                        "- repair",
+                        "- wanted",
+                        "- laptop / notebook",
+                        "",
+                        "Selected Marketplaces:",
+                        "- Vinted enabled now",
+                        "- eBay / CeX / Gumtree planned for Phase 7",
                     ],
                 )
             )
@@ -1602,10 +1678,15 @@ class MainWindow(Gtk.ApplicationWindow):
         image_button = Gtk.Button(label="Image Check")
         image_button.connect("clicked", self._on_image_check_clicked, listing.image_url)
 
+        score_button = Gtk.Button(label="Score Details")
+        score_button.connect("clicked", self._on_score_details_clicked, listing.title, listing.price, decision)
+
         button_row.append(save_button)
         button_row.append(remove_button)
         button_row.append(open_button)
         button_row.append(image_button)
+        button_row.append(stored_score_button)
+        button_row.append(score_button)
 
         details.append(meta)
         details.append(scores)
@@ -1726,6 +1807,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
         image_button = Gtk.Button(label="Image Check")
         image_button.connect("clicked", self._on_image_check_clicked, listing.image_url)
+
+        stored_score_button = Gtk.Button(label="Score Details")
+        stored_score_button.connect("clicked", self._on_score_details_clicked, listing.title, listing.price, decision)
 
         button_row.append(fav_button)
         button_row.append(watch_button)
@@ -1939,35 +2023,53 @@ class MainWindow(Gtk.ApplicationWindow):
         if not image_url:
             return frame
 
-        picture = Gtk.Picture()
-        picture.set_size_request(120, 100)
+        loading = Gtk.Label(label="Loading image...")
+        loading.add_css_class("muted")
+        frame.set_child(loading)
 
-        try:
-            picture.set_content_fit(Gtk.ContentFit.COVER)
-        except AttributeError:
-            pass
+        def make_picture(path) -> Gtk.Picture | None:
+            if path is None:
+                return None
+
+            picture = Gtk.Picture()
+            picture.set_size_request(120, 100)
+
+            try:
+                picture.set_content_fit(Gtk.ContentFit.COVER)
+            except AttributeError:
+                pass
+
+            try:
+                texture = Gdk.Texture.new_from_filename(str(path))
+                picture.set_paintable(texture)
+                return picture
+            except Exception:
+                try:
+                    picture.set_filename(str(path))
+                    return picture
+                except Exception:
+                    return None
 
         cached_path = None
 
         if hasattr(self.image_cache, "cached_path_for_url"):
             cached_path = self.image_cache.cached_path_for_url(image_url)
 
-        if cached_path is not None:
-            try:
-                picture.set_filename(str(cached_path))
-                frame.set_child(picture)
-                return frame
-            except Exception:
-                pass
+        cached_picture = make_picture(cached_path)
 
-        frame.set_child(picture)
+        if cached_picture is not None:
+            frame.set_child(cached_picture)
+            return frame
 
         def apply_image(path):
-            if path is not None:
-                try:
-                    picture.set_filename(str(path))
-                except Exception:
-                    pass
+            picture = make_picture(path)
+
+            if picture is not None:
+                current_child = frame.get_child()
+
+                if current_child is loading:
+                    frame.set_child(picture)
+
             return False
 
         self.image_cache.fetch_async(image_url, apply_image)
@@ -2048,7 +2150,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self.live_priority_dropdown.set_selected(1)
 
         if hasattr(self, "live_sort_dropdown"):
-            self.live_sort_dropdown.set_selected(0)
+            self.live_sort_dropdown.connect("notify::selected", self._on_live_filter_debounced)
+        self.live_sort_dropdown.set_selected(0)
 
         if hasattr(self, "live_max_price_input"):
             self.live_max_price_input.set_value(0)
@@ -2697,6 +2800,352 @@ class MainWindow(Gtk.ApplicationWindow):
         if value is None:
             return "Not yet"
         return value.astimezone().strftime("%H:%M:%S")
+
+
+    def _on_import_build_clicked(self, _button: Gtk.Button) -> None:
+        self._open_build_import_window()
+
+    def _open_build_import_window(self) -> None:
+        existing_window = getattr(self, "build_import_window", None)
+
+        if existing_window is not None:
+            existing_window.present()
+            return
+
+        window = Gtk.Window()
+        window.set_title("Import Build List")
+        window.set_transient_for(self)
+        window.set_modal(True)
+        window.set_default_size(900, 720)
+        window.connect("close-request", self._on_build_import_window_closed)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.set_margin_top(20)
+        root.set_margin_bottom(20)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
+        window.set_child(root)
+
+        root.append(self._heading("Import Build List"))
+        root.append(
+            self._muted_label(
+                "Paste almost any build list from ChatGPT, Reddit, Discord, notes or PCPartPicker-style text. DealWise will detect parts, prices, reused items and checklist status."
+            )
+        )
+
+        example = (
+            "Final Build Cost\n\n"
+            "7800X3D £200\n"
+            "ASUS TUF B650-E £85\n"
+            "SSD 2TB £80\n"
+            "PSU £80\n"
+            "Case £70\n"
+            "Cooler £35\n\n"
+            "Reuse:\n"
+            "✓ RX6400\n"
+            "✓ Existing RAM"
+        )
+
+        self.build_import_text_view = Gtk.TextView()
+        self.build_import_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.build_import_text_view.set_vexpand(True)
+        self.build_import_buffer = self.build_import_text_view.get_buffer()
+        self.build_import_buffer.set_text(example)
+
+        paste_scroll = Gtk.ScrolledWindow()
+        paste_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        paste_scroll.set_vexpand(True)
+        paste_scroll.set_min_content_height(280)
+        paste_scroll.set_child(self.build_import_text_view)
+        root.append(paste_scroll)
+
+        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        parse_button = Gtk.Button(label="Parse Preview")
+        parse_button.connect("clicked", self._on_build_import_parse_clicked)
+
+        apply_button = Gtk.Button(label="Apply To PC Builder")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", self._on_build_import_apply_clicked)
+
+        searches_button = Gtk.Button(label="Create Searches")
+        searches_button.connect("clicked", self._on_build_import_create_searches_clicked)
+
+        close_button = Gtk.Button(label="Close")
+        close_button.connect("clicked", lambda _button: window.close())
+
+        button_row.append(parse_button)
+        button_row.append(apply_button)
+        button_row.append(searches_button)
+        button_row.append(close_button)
+        root.append(button_row)
+
+        self.build_import_result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        root.append(self.build_import_result_box)
+
+        self.build_import_window = window
+        self._show_build_import_result(self._parse_build_import_text())
+        window.present()
+
+    def _on_build_import_window_closed(self, _window: Gtk.Window) -> bool:
+        self.build_import_window = None
+        return False
+
+    def _parse_build_import_text(self) -> BuildImportResult:
+        if not hasattr(self, "build_import_buffer"):
+            return self.build_import_service.parse("")
+
+        start_iter, end_iter = self.build_import_buffer.get_bounds()
+        text = self.build_import_buffer.get_text(start_iter, end_iter, False)
+        return self.build_import_service.parse(text)
+
+    def _on_build_import_parse_clicked(self, _button: Gtk.Button) -> None:
+        self._show_build_import_result(self._parse_build_import_text())
+
+    def _on_build_import_apply_clicked(self, _button: Gtk.Button) -> None:
+        result = self._parse_build_import_text()
+        self.build_import_service.apply_to_pc_builder(result)
+        self._show_build_import_result(result, extra_message="Applied to PC Builder.")
+        self._refresh_pc_builder()
+        self._refresh_runtime_stats()
+
+    def _on_build_import_create_searches_clicked(self, _button: Gtk.Button) -> None:
+        result = self._parse_build_import_text()
+        existing = {search.query.lower().strip() for search in self.config_manager.load_saved_searches()}
+        added = 0
+
+        for item in result.items:
+            if item.status in {"Bought", "Stop Searching"}:
+                continue
+
+            for term in item.search_terms:
+                key = term.lower().strip()
+
+                if not key or key in existing:
+                    continue
+
+                search = SavedSearch.create(
+                    query=term,
+                    marketplace="Vinted",
+                    min_price=None,
+                    max_price=None,
+                    condition="Any",
+                    excluded_keywords=[
+                        "broken",
+                        "faulty",
+                        "spares",
+                        "repair",
+                        "wanted",
+                        "laptop",
+                        "notebook",
+                    ],
+                    refresh_interval_minutes=5,
+                )
+
+                self.config_manager.add_saved_search(search)
+                existing.add(key)
+                added += 1
+
+        self._refresh_saved_searches()
+        self._refresh_runtime_stats()
+        self._show_build_import_result(result, extra_message=f"Created {added} saved search(es).")
+
+    def _show_build_import_result(self, result: BuildImportResult, extra_message: str = "") -> None:
+        if not hasattr(self, "build_import_result_box"):
+            return
+
+        self._clear_box(self.build_import_result_box)
+
+        lines = [
+            extra_message,
+            f"Detected Items: {len(result.items)}",
+            f"Build Total: £{result.total:.0f}",
+            f"Priced Items: {result.priced_count}",
+            f"Reused Items: {result.reused_count}",
+            f"Unknown Items: {result.unknown_count}",
+            "",
+            "Detected Components:",
+        ]
+
+        lines = [line for line in lines if line != ""]
+
+        for item in result.items:
+            price = "Reuse" if item.reused else ("-" if item.price is None else f"£{item.price:.0f}")
+            terms = ", ".join(item.search_terms)
+            lines.append(f"{item.part_type}: {item.name} | {price} | {item.status} | Searches: {terms}")
+
+        if result.warnings:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.extend(result.warnings)
+
+        self.build_import_result_box.append(self._section_card("Build Import Preview", lines))
+
+    def _build_summary_text(self, format_name: str = "markdown") -> str:
+        return self.build_import_service.build_export(format_name)
+
+    def _on_copy_build_summary_clicked(self, _button: Gtk.Button) -> None:
+        copied = self._copy_text_to_clipboard(self._build_summary_text("markdown"))
+
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text("Build summary copied to clipboard." if copied else "Could not copy build summary.")
+
+    def _on_export_build_markdown_clicked(self, _button: Gtk.Button) -> None:
+        self._export_build_summary("markdown", "md")
+
+    def _on_export_build_json_clicked(self, _button: Gtk.Button) -> None:
+        self._export_build_summary("json", "json")
+
+    def _export_build_summary(self, format_name: str, suffix: str) -> None:
+        export_dir = self.config_manager.app_dir / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        output_path = export_dir / f"dealwise-build-summary.{suffix}"
+        output_path.write_text(self._build_summary_text(format_name), encoding="utf-8")
+
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text(f"Build summary exported: {output_path}")
+
+    def _on_restore_hidden_listing_clicked(self, _button: Gtk.Button, dedupe_key: str) -> None:
+        if hasattr(self.search_manager, "restore_hidden_listing"):
+            self.search_manager.restore_hidden_listing(dedupe_key)
+
+        self._live_render_signature = ""
+        self._refresh_live_results(force=True)
+        self._refresh_runtime_stats()
+
+    def _hidden_listing_row(self, listing: MarketplaceListing) -> Gtk.ListBoxRow:
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+
+        frame = Gtk.Frame()
+        frame.add_css_class("deal-card")
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        outer.set_margin_top(12)
+        outer.set_margin_bottom(12)
+        outer.set_margin_start(12)
+        outer.set_margin_end(12)
+
+        details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        details.set_hexpand(True)
+
+        title = Gtk.Label(label=listing.title, xalign=0)
+        title.add_css_class("row-title")
+        title.set_wrap(True)
+
+        meta = Gtk.Label(
+            label=f"{listing.marketplace} • {listing.price_label()} • Hidden from current Live Deals",
+            xalign=0,
+        )
+        meta.add_css_class("muted")
+        meta.set_wrap(True)
+
+        details.append(title)
+        details.append(meta)
+
+        restore_button = Gtk.Button(label="Restore")
+        restore_button.connect("clicked", self._on_restore_hidden_listing_clicked, listing.dedupe_key)
+
+        open_button = Gtk.Button(label="Open")
+        open_button.connect("clicked", self._on_open_listing_clicked, listing.url)
+
+        outer.append(details)
+        outer.append(restore_button)
+        outer.append(open_button)
+
+        frame.set_child(outer)
+        row.set_child(frame)
+        return row
+
+    def _on_score_details_clicked(self, _button: Gtk.Button, title: str, price: float | None, decision) -> None:
+        window = Gtk.Window()
+        window.set_title("Deal Score Details")
+        window.set_transient_for(self)
+        window.set_modal(True)
+        window.set_default_size(620, 520)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.set_margin_top(20)
+        root.set_margin_bottom(20)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
+        window.set_child(root)
+
+        root.append(self._heading("Deal Score Details"))
+        root.append(self._section_card("Score Breakdown", self._deal_score_explanation_lines(title, price, decision)))
+
+        close_button = Gtk.Button(label="Close")
+        close_button.connect("clicked", lambda _button: window.close())
+        root.append(close_button)
+
+        window.present()
+
+    def _deal_score_explanation_lines(self, title: str, price: float | None, decision) -> list[str]:
+        stats = self.price_history_service.stats_for_title(title)
+        confidence = "Low"
+
+        if stats is not None:
+            if stats.sample_count >= 8:
+                confidence = "High"
+            elif stats.sample_count >= 4:
+                confidence = "Medium"
+
+        price_points = min(40, max(0, int(decision.deal_score * 0.40)))
+        condition_points = min(20, max(0, int(decision.evidence_confidence * 0.20)))
+        history_points = 0 if stats is None else min(15, max(0, int((100 - self._historical_price_rank(title, price)) * 0.15)))
+        demand_points = min(15, max(0, int(decision.urgency_score * 0.15)))
+        seller_points = min(10, max(0, int((100 - int(decision.scam_risk * 10)) * 0.10)))
+
+        recommendation = "Excellent deal." if decision.deal_score >= 85 else (
+            "Good deal if evidence checks out." if decision.deal_score >= 70 else (
+                "Worth watching." if decision.deal_score >= 55 else "Not strong enough yet."
+            )
+        )
+
+        history_line = "Historical Price: no local history yet."
+
+        if stats is not None:
+            history_line = (
+                f"Historical Price: {history_points}/15 "
+                f"({stats.sample_count} sample(s), range {stats.range_label()}, average {stats.average_label()})"
+            )
+
+        return [
+            f"Item: {title}",
+            f"Final Deal Score: {decision.deal_score}/100",
+            f"Confidence: {confidence}",
+            "",
+            f"Price: {price_points}/40",
+            f"Condition / Evidence: {condition_points}/20",
+            history_line,
+            f"Demand / Urgency: {demand_points}/15",
+            f"Seller / Scam Risk: {seller_points}/10",
+            "",
+            f"Scam Risk: {decision.scam_risk}/10",
+            f"Build Fit: {decision.build_fit}/100",
+            f"Budget Fit: {decision.budget_fit}/100",
+            f"Evidence Confidence: {decision.evidence_confidence}/100",
+            "",
+            f"Recommendation: {recommendation}",
+            "",
+            "Reasoning:",
+            *[f"- {reason}" for reason in decision.reasoning],
+        ]
+
+    def _on_live_filter_debounced(self, *_args) -> None:
+        timer_id = getattr(self, "_live_filter_timer_id", None)
+
+        if timer_id is not None:
+            GLib.source_remove(timer_id)
+
+        self._live_filter_timer_id = GLib.timeout_add(180, self._run_live_filter_refresh)
+
+    def _run_live_filter_refresh(self) -> bool:
+        self._live_filter_timer_id = None
+        self._live_render_signature = ""
+        self._refresh_live_results(force=True)
+        return False
+
 
     def _load_css(self) -> None:
         css = """

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.7.0] - 2026-07-11
+
+### Added
+
+- Polish + Build Import phase.
+- Build Import window for copied lists from ChatGPT, Reddit, Discord, notes and PCPartPicker-style text.
+- Natural-language component parser for CPU, GPU, motherboard, RAM, PSU, case, storage and cooling.
+- Reused/existing part detection.
+- Build checklist population from imported text.
+- Build summary copy/export to Markdown and JSON.
+- Hidden Deals section with restore action.
+- Wishlist Progress card in PC Builder.
+- Search Builder card showing generated terms and negative keywords.
+- Deal Score details window with score breakdown and confidence rating.
+- Debounced real-time Live Deals filtering.
+- Loading image placeholder and improved cached image file extensions.
+
+### Changed
+
+- Removing a live deal now moves it to Hidden Deals instead of deleting it.
+- Image loading avoids replacing an already-loaded image.
+- Phase 7 is intentionally paused until this polish pass feels smooth.
+
+### Notes
+
+- README intentionally not changed.
+
 ## [0.6.5] - 2026-07-11
 
 ### Added

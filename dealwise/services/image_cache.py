@@ -4,6 +4,7 @@ import hashlib
 import threading
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from gi.repository import GLib
@@ -11,6 +12,8 @@ from gi.repository import GLib
 
 class ImageCacheService:
     """Small async image cache for marketplace listing thumbnails."""
+
+    VALID_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
     def __init__(self, cache_dir: Path) -> None:
         self.cache_dir = cache_dir
@@ -26,6 +29,11 @@ class ImageCacheService:
         if cached_path.exists():
             return cached_path
 
+        legacy_path = self._legacy_path_for_url(url)
+
+        if legacy_path.exists():
+            return legacy_path
+
         return None
 
     def fetch_async(self, url: str | None, callback) -> None:
@@ -37,6 +45,12 @@ class ImageCacheService:
 
         if cached_path.exists():
             GLib.idle_add(callback, cached_path)
+            return
+
+        legacy_path = self._legacy_path_for_url(url)
+
+        if legacy_path.exists():
+            GLib.idle_add(callback, legacy_path)
             return
 
         if url in self._active_urls:
@@ -58,7 +72,7 @@ class ImageCacheService:
             request = Request(
                 url,
                 headers={
-                    "User-Agent": "DealWise/0.4 image-cache",
+                    "User-Agent": "DealWise/0.7 image-cache",
                     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
                 },
             )
@@ -76,5 +90,14 @@ class ImageCacheService:
             GLib.idle_add(callback, result)
 
     def _path_for_url(self, url: str) -> Path:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        suffix = Path(urlparse(url).path).suffix.lower()
+
+        if suffix not in self.VALID_SUFFIXES:
+            suffix = ".jpg"
+
+        return self.cache_dir / f"{digest}{suffix}"
+
+    def _legacy_path_for_url(self, url: str) -> Path:
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{digest}.img"

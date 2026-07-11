@@ -39,6 +39,7 @@ class SearchManager:
         self._live_results: list[MarketplaceListing] = []
         self._seen_listing_keys: set[str] = set()
         self._hidden_listing_keys: set[str] = set()
+        self._hidden_live_results: dict[str, MarketplaceListing] = {}
         self._connector_status = "Connectors idle."
         self._marketplace_backoff_until: dict[str, datetime] = {}
         self._lock = threading.RLock()
@@ -142,13 +143,35 @@ class SearchManager:
 
     def hide_live_listing(self, dedupe_key: str) -> None:
         with self._lock:
-            self._hidden_listing_keys.add(dedupe_key)
-            self._live_results = [
-                listing
-                for listing in self._live_results
-                if listing.dedupe_key != dedupe_key
-            ]
-            self._connector_status = "Listing removed from current Live Deals view."
+            kept_results: list[MarketplaceListing] = []
+
+            for listing in self._live_results:
+                if listing.dedupe_key == dedupe_key:
+                    self._hidden_listing_keys.add(dedupe_key)
+                    self._hidden_live_results[dedupe_key] = listing
+                else:
+                    kept_results.append(listing)
+
+            self._live_results = kept_results
+            self._connector_status = "Listing moved to Hidden Deals."
+
+    def restore_hidden_listing(self, dedupe_key: str) -> None:
+        with self._lock:
+            listing = self._hidden_live_results.pop(dedupe_key, None)
+            self._hidden_listing_keys.discard(dedupe_key)
+
+            if listing is not None and listing.dedupe_key not in {item.dedupe_key for item in self._live_results}:
+                self._live_results.insert(0, listing)
+
+            self._connector_status = "Listing restored from Hidden Deals."
+
+    def get_hidden_results(self, limit: int = 100) -> list[MarketplaceListing]:
+        with self._lock:
+            return list(self._hidden_live_results.values())[:limit]
+
+    def hidden_count(self) -> int:
+        with self._lock:
+            return len(self._hidden_live_results)
 
     def get_stats(self) -> RuntimeStats:
         saved_searches = self.config_manager.load_saved_searches()
