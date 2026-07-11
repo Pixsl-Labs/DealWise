@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.8.0] - 2026-07-11
+
+### Added
+
+- RAM Hunt page.
+- Final 32GB DDR5 kit profile.
+- Temporary DDR5 test-stick profile.
+- RAM-specific query generation.
+- RAM parser for DDR generation, capacity, module count, speed, CAS latency, EXPO/XMP, SO-DIMM and ECC/RDIMM flags.
+- RAM deal score service with explainable factors.
+- RAM seller message generator.
+- Browser handoff URLs for eBay, Gumtree, CeX, Facebook Marketplace and retail reference sites.
+- Vinted RAM batch search creation.
+- PC Builder RAM row integration.
+- RAM Hunt tests.
+
+### Fixed
+
+- RAM searches now exclude DDR4, SO-DIMM, laptop, server, ECC, registered and RDIMM listings by default.
+- PC Builder RAM target updated for AM5 DDR5-6000 final-kit hunting.
+
+### Notes
+
+- README intentionally not changed.
+- Facebook Marketplace is browser handoff/manual import only. No login automation or credential storage.
+- Broken or unavailable marketplaces must not crash the app.
+
 ## [0.7.5] - 2026-07-11
 
 ### Fixed

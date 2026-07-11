@@ -16,6 +16,7 @@ from dealwise.repositories.listing_repository import ListingRepository, StoredLi
 from dealwise.services.listing_intelligence import ListingIntelligenceService
 from dealwise.services.pc_builder_service import PCBuilderService
 from dealwise.services.search_manager import SearchManager
+from dealwise.services.ram_hunt import RAMHuntProfile, RAMHuntService
 from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
 from dealwise.services.price_history import PriceHistoryService
@@ -221,6 +222,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.price_history_service = PriceHistoryService(self.pc_builder_service.database)
         self.compatibility_service = CompatibilityService()
         self.build_import_service = BuildImportService(self.pc_builder_service)
+        self.ram_hunt_service = RAMHuntService()
         self._live_render_signature = ""
         self._pc_builder_refresh_timer_id: int | None = None
 
@@ -325,6 +327,7 @@ class MainWindow(Gtk.ApplicationWindow):
         pages = [
             ("dashboard", "Dashboard", self._build_dashboard_page()),
             ("pc_builder", "PC Builder", self._build_pc_builder_page()),
+            ("ram_hunt", "RAM Hunt", self._build_ram_hunt_page()),
             ("live_deals", "Live Deals", self._build_live_deals_page()),
             ("saved_listings", "Saved Listings", self._build_saved_listings_page()),
             ("listing_checker", "Listing Checker", self._build_listing_checker_page()),
@@ -540,6 +543,434 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self.parts_list)
 
         return self._scroll(page)
+
+
+    def _build_ram_hunt_page(self) -> Gtk.Widget:
+        page = self._page_container()
+        page.append(self._heading("RAM Hunt"))
+        page.append(
+            self._muted_label(
+                "Urgent RAM workflow for AM5: final 32GB DDR5 kit or temporary POST/test stick. Facebook is browser handoff/manual import only."
+            )
+        )
+
+        banner = Gtk.Frame()
+        banner.add_css_class("card")
+        banner.set_margin_top(12)
+
+        banner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        banner_box.set_margin_top(12)
+        banner_box.set_margin_bottom(12)
+        banner_box.set_margin_start(12)
+        banner_box.set_margin_end(12)
+
+        self.ram_hunt_banner_label = self._muted_label("Deadline and best-match summary will appear here.")
+        banner_box.append(self.ram_hunt_banner_label)
+        banner.set_child(banner_box)
+        page.append(banner)
+
+        controls = Gtk.Frame()
+        controls.add_css_class("card")
+        controls.set_margin_top(16)
+
+        grid = Gtk.Grid()
+        grid.set_row_spacing(10)
+        grid.set_column_spacing(12)
+        grid.set_margin_top(14)
+        grid.set_margin_bottom(14)
+        grid.set_margin_start(14)
+        grid.set_margin_end(14)
+
+        self.ram_mode_dropdown = Gtk.DropDown.new_from_strings(["Final 32GB Kit", "Temporary Test Stick", "Custom"])
+        self.ram_capacity_dropdown = Gtk.DropDown.new_from_strings(["8", "16", "32", "64"])
+        self.ram_module_dropdown = Gtk.DropDown.new_from_strings(["1x8GB", "1x16GB", "1x32GB", "2x8GB", "2x16GB", "2x32GB"])
+        self.ram_memory_type_dropdown = Gtk.DropDown.new_from_strings(["DDR5"])
+        self.ram_min_speed_dropdown = Gtk.DropDown.new_from_strings(["4800", "5200", "5600", "6000", "6200", "6400"])
+        self.ram_max_speed_dropdown = Gtk.DropDown.new_from_strings(["5600", "6000", "6400", "7200"])
+        self.ram_max_cl_dropdown = Gtk.DropDown.new_from_strings(["30", "32", "36", "40", "46"])
+        self.ram_rgb_dropdown = Gtk.DropDown.new_from_strings(["Any", "RGB", "Non-RGB"])
+        self.ram_condition_dropdown = Gtk.DropDown.new_from_strings(["Either", "New", "Used"])
+        self.ram_delivery_dropdown = Gtk.DropDown.new_from_strings(["Delivery or collection", "Delivery only", "Collection only"])
+
+        self.ram_expo_check = Gtk.CheckButton(label="AMD EXPO preferred")
+        self.ram_expo_check.set_active(True)
+        self.ram_xmp_check = Gtk.CheckButton(label="Allow XMP")
+        self.ram_xmp_check.set_active(True)
+        self.ram_urgent_check = Gtk.CheckButton(label="Urgent hunt mode")
+        self.ram_urgent_check.set_active(True)
+
+        self.ram_distance_input = Gtk.SpinButton.new_with_range(0, 200, 5)
+        self.ram_distance_input.set_value(25)
+        self.ram_item_max_input = Gtk.SpinButton.new_with_range(0, 1000, 5)
+        self.ram_item_max_input.set_value(180)
+        self.ram_all_in_max_input = Gtk.SpinButton.new_with_range(0, 1000, 5)
+        self.ram_all_in_max_input.set_value(200)
+        self.ram_deadline_entry = Gtk.Entry()
+        self.ram_deadline_entry.set_text("2026-07-14")
+
+        self.ram_excluded_entry = Gtk.Entry()
+        self.ram_excluded_entry.set_text("ddr4,sodimm,so-dimm,laptop,server,ecc,registered,rdimm,broken,faulty,spares,repair,wanted")
+
+        controls_to_refresh = [
+            self.ram_mode_dropdown,
+            self.ram_capacity_dropdown,
+            self.ram_module_dropdown,
+            self.ram_min_speed_dropdown,
+            self.ram_max_speed_dropdown,
+            self.ram_max_cl_dropdown,
+            self.ram_rgb_dropdown,
+            self.ram_condition_dropdown,
+            self.ram_delivery_dropdown,
+        ]
+
+        for dropdown in controls_to_refresh:
+            dropdown.connect("notify::selected", self._on_ram_hunt_controls_changed)
+
+        for widget in [
+            self.ram_expo_check,
+            self.ram_xmp_check,
+            self.ram_urgent_check,
+        ]:
+            widget.connect("toggled", self._on_ram_hunt_controls_changed)
+
+        for widget in [
+            self.ram_distance_input,
+            self.ram_item_max_input,
+            self.ram_all_in_max_input,
+        ]:
+            widget.connect("value-changed", self._on_ram_hunt_controls_changed)
+
+        self.ram_deadline_entry.connect("changed", self._on_ram_hunt_controls_changed)
+        self.ram_excluded_entry.connect("changed", self._on_ram_hunt_controls_changed)
+
+        self._set_dropdown_by_value(self.ram_capacity_dropdown, "32")
+        self._set_dropdown_by_value(self.ram_module_dropdown, "2x16GB")
+        self._set_dropdown_by_value(self.ram_min_speed_dropdown, "6000")
+        self._set_dropdown_by_value(self.ram_max_speed_dropdown, "7200")
+        self._set_dropdown_by_value(self.ram_max_cl_dropdown, "36")
+
+        row = 0
+        grid.attach(self._form_label("Hunt Mode"), 0, row, 1, 1)
+        grid.attach(self.ram_mode_dropdown, 1, row, 1, 1)
+        grid.attach(self._form_label("Capacity"), 2, row, 1, 1)
+        grid.attach(self.ram_capacity_dropdown, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Module Config"), 0, row, 1, 1)
+        grid.attach(self.ram_module_dropdown, 1, row, 1, 1)
+        grid.attach(self._form_label("Memory Type"), 2, row, 1, 1)
+        grid.attach(self.ram_memory_type_dropdown, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Min Speed"), 0, row, 1, 1)
+        grid.attach(self.ram_min_speed_dropdown, 1, row, 1, 1)
+        grid.attach(self._form_label("Max Speed"), 2, row, 1, 1)
+        grid.attach(self.ram_max_speed_dropdown, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Max CL"), 0, row, 1, 1)
+        grid.attach(self.ram_max_cl_dropdown, 1, row, 1, 1)
+        grid.attach(self._form_label("RGB"), 2, row, 1, 1)
+        grid.attach(self.ram_rgb_dropdown, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Condition"), 0, row, 1, 1)
+        grid.attach(self.ram_condition_dropdown, 1, row, 1, 1)
+        grid.attach(self._form_label("Delivery"), 2, row, 1, 1)
+        grid.attach(self.ram_delivery_dropdown, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Collection Distance"), 0, row, 1, 1)
+        grid.attach(self.ram_distance_input, 1, row, 1, 1)
+        grid.attach(self._form_label("Item Max"), 2, row, 1, 1)
+        grid.attach(self.ram_item_max_input, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("All-In Max"), 0, row, 1, 1)
+        grid.attach(self.ram_all_in_max_input, 1, row, 1, 1)
+        grid.attach(self._form_label("Deadline"), 2, row, 1, 1)
+        grid.attach(self.ram_deadline_entry, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self.ram_expo_check, 1, row, 1, 1)
+        grid.attach(self.ram_xmp_check, 2, row, 1, 1)
+        grid.attach(self.ram_urgent_check, 3, row, 1, 1)
+
+        row += 1
+        grid.attach(self._form_label("Excluded Keywords"), 0, row, 1, 1)
+        grid.attach(self.ram_excluded_entry, 1, row, 3, 1)
+
+        controls.set_child(grid)
+        page.append(controls)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        actions.set_margin_top(12)
+
+        final_button = Gtk.Button(label="Use Final Kit Profile")
+        final_button.connect("clicked", self._on_ram_hunt_final_profile_clicked)
+
+        temporary_button = Gtk.Button(label="Use Temporary Test Profile")
+        temporary_button.connect("clicked", self._on_ram_hunt_temporary_profile_clicked)
+
+        search_vinted_button = Gtk.Button(label="Search Vinted Batch")
+        search_vinted_button.add_css_class("suggested-action")
+        search_vinted_button.connect("clicked", self._on_ram_hunt_search_vinted_clicked)
+
+        open_all_button = Gtk.Button(label="Open All Marketplace Searches")
+        open_all_button.connect("clicked", self._on_ram_hunt_open_all_clicked)
+
+        copy_message_button = Gtk.Button(label="Copy Seller Message")
+        copy_message_button.connect("clicked", self._on_ram_hunt_copy_message_clicked)
+
+        apply_builder_button = Gtk.Button(label="Apply To PC Builder RAM")
+        apply_builder_button.connect("clicked", self._on_ram_hunt_apply_builder_clicked)
+
+        mark_bought_button = Gtk.Button(label="Mark RAM Bought")
+        mark_bought_button.connect("clicked", self._on_ram_hunt_mark_bought_clicked)
+
+        for button in [
+            final_button,
+            temporary_button,
+            search_vinted_button,
+            open_all_button,
+            copy_message_button,
+            apply_builder_button,
+            mark_bought_button,
+        ]:
+            actions.append(button)
+
+        page.append(actions)
+
+        self.ram_hunt_output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.ram_hunt_output_box.set_margin_top(16)
+        page.append(self.ram_hunt_output_box)
+
+        self._refresh_ram_hunt_page()
+        return self._scroll(page)
+
+    def _current_ram_hunt_profile(self) -> RAMHuntProfile:
+        excluded = [
+            item.strip()
+            for item in self.ram_excluded_entry.get_text().split(",")
+            if item.strip()
+        ] if hasattr(self, "ram_excluded_entry") else []
+
+        return RAMHuntProfile(
+            mode=self._dropdown_text(self.ram_mode_dropdown) if hasattr(self, "ram_mode_dropdown") else "Final 32GB Kit",
+            capacity_gb=int(self._dropdown_text(self.ram_capacity_dropdown)) if hasattr(self, "ram_capacity_dropdown") else 32,
+            module_config=self._dropdown_text(self.ram_module_dropdown) if hasattr(self, "ram_module_dropdown") else "2x16GB",
+            memory_type="DDR5",
+            min_speed=int(self._dropdown_text(self.ram_min_speed_dropdown)) if hasattr(self, "ram_min_speed_dropdown") else 6000,
+            max_speed=int(self._dropdown_text(self.ram_max_speed_dropdown)) if hasattr(self, "ram_max_speed_dropdown") else 7200,
+            max_cas_latency=int(self._dropdown_text(self.ram_max_cl_dropdown)) if hasattr(self, "ram_max_cl_dropdown") else 36,
+            expo_preferred=self.ram_expo_check.get_active() if hasattr(self, "ram_expo_check") else True,
+            allow_xmp=self.ram_xmp_check.get_active() if hasattr(self, "ram_xmp_check") else True,
+            rgb=self._dropdown_text(self.ram_rgb_dropdown) if hasattr(self, "ram_rgb_dropdown") else "Any",
+            condition=self._dropdown_text(self.ram_condition_dropdown) if hasattr(self, "ram_condition_dropdown") else "Either",
+            delivery_mode=self._dropdown_text(self.ram_delivery_dropdown) if hasattr(self, "ram_delivery_dropdown") else "Delivery or collection",
+            collection_distance_miles=int(self.ram_distance_input.get_value()) if hasattr(self, "ram_distance_input") else 25,
+            item_price_max=float(self.ram_item_max_input.get_value()) if hasattr(self, "ram_item_max_input") else 180,
+            all_in_price_max=float(self.ram_all_in_max_input.get_value()) if hasattr(self, "ram_all_in_max_input") else 200,
+            deadline=self.ram_deadline_entry.get_text().strip() if hasattr(self, "ram_deadline_entry") else "2026-07-14",
+            excluded_keywords=excluded,
+            urgent=self.ram_urgent_check.get_active() if hasattr(self, "ram_urgent_check") else True,
+        )
+
+    def _on_ram_hunt_controls_changed(self, *_args) -> None:
+        self._refresh_ram_hunt_page()
+
+    def _refresh_ram_hunt_page(self) -> None:
+        if not hasattr(self, "ram_hunt_output_box"):
+            return
+
+        self._clear_box(self.ram_hunt_output_box)
+        profile = self._current_ram_hunt_profile()
+        queries = self.ram_hunt_service.query_variants(profile)
+        urls = self.ram_hunt_service.browser_urls(profile)
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text(
+                f"{profile.mode} | {profile.capacity_gb}GB {profile.module_config} {profile.memory_type} | "
+                f"{profile.min_speed}-{profile.max_speed}MT/s | max CL{profile.max_cas_latency} | "
+                f"All-in max £{profile.all_in_price_max:.0f} | {profile.deadline_label()}"
+            )
+
+        self.ram_hunt_output_box.append(
+            self._section_card(
+                "RAM Hunt Summary",
+                [
+                    f"Mode: {profile.mode}",
+                    f"Target: {profile.capacity_gb}GB {profile.module_config} {profile.memory_type}",
+                    f"Speed: {profile.min_speed} to {profile.max_speed} MT/s",
+                    f"Maximum CAS latency: CL{profile.max_cas_latency}",
+                    f"AMD EXPO preferred: {profile.expo_preferred}",
+                    f"XMP allowed: {profile.allow_xmp}",
+                    f"All-in price maximum: £{profile.all_in_price_max:.0f}",
+                    f"Urgent mode: {profile.urgent}",
+                    f"Deadline: {profile.deadline_label()}",
+                    "Temporary mode note: Suitable for testing — not recommended as the final gaming configuration."
+                    if profile.mode == "Temporary Test Stick"
+                    else "Final mode note: prioritise 2x16GB desktop DDR5-6000 CL30/32/36 kits with EXPO or likely AM5 compatibility.",
+                ],
+            )
+        )
+
+        self.ram_hunt_output_box.append(
+            self._section_card(
+                "Generated Search Terms",
+                [f"- {query}" for query in queries],
+            )
+        )
+
+        self.ram_hunt_output_box.append(
+            self._section_card(
+                "Negative Keywords",
+                [f"- {keyword}" for keyword in profile.excluded_keywords],
+            )
+        )
+
+        self.ram_hunt_output_box.append(
+            self._section_card(
+                "Marketplace Handoff",
+                [
+                    f"{marketplace}: {label}"
+                    for marketplace, label, _url in urls
+                ],
+            )
+        )
+
+        self.ram_hunt_output_box.append(
+            self._section_card(
+                "Seller Message Preview",
+                self.ram_hunt_service.seller_message(profile).splitlines(),
+            )
+        )
+
+    def _apply_ram_profile_to_controls(self, profile: RAMHuntProfile) -> None:
+        self._set_dropdown_by_value(self.ram_mode_dropdown, profile.mode)
+        self._set_dropdown_by_value(self.ram_capacity_dropdown, str(profile.capacity_gb))
+        self._set_dropdown_by_value(self.ram_module_dropdown, profile.module_config)
+        self._set_dropdown_by_value(self.ram_min_speed_dropdown, str(profile.min_speed))
+        self._set_dropdown_by_value(self.ram_max_speed_dropdown, str(profile.max_speed))
+        self._set_dropdown_by_value(self.ram_max_cl_dropdown, str(profile.max_cas_latency))
+        self._set_dropdown_by_value(self.ram_rgb_dropdown, profile.rgb)
+        self._set_dropdown_by_value(self.ram_condition_dropdown, profile.condition)
+        self._set_dropdown_by_value(self.ram_delivery_dropdown, profile.delivery_mode)
+        self.ram_expo_check.set_active(profile.expo_preferred)
+        self.ram_xmp_check.set_active(profile.allow_xmp)
+        self.ram_urgent_check.set_active(profile.urgent)
+        self.ram_distance_input.set_value(profile.collection_distance_miles)
+        self.ram_item_max_input.set_value(profile.item_price_max)
+        self.ram_all_in_max_input.set_value(profile.all_in_price_max)
+        self.ram_deadline_entry.set_text(profile.deadline)
+        self.ram_excluded_entry.set_text(",".join(profile.excluded_keywords))
+        self._refresh_ram_hunt_page()
+
+    def _on_ram_hunt_final_profile_clicked(self, _button: Gtk.Button) -> None:
+        self._apply_ram_profile_to_controls(RAMHuntProfile.final_default())
+
+    def _on_ram_hunt_temporary_profile_clicked(self, _button: Gtk.Button) -> None:
+        self._apply_ram_profile_to_controls(RAMHuntProfile.temporary_default())
+
+    def _on_ram_hunt_search_vinted_clicked(self, _button: Gtk.Button) -> None:
+        profile = self._current_ram_hunt_profile()
+        queries = self.ram_hunt_service.query_variants(profile)[:4]
+        started = 0
+
+        for query in queries:
+            search = SavedSearch.create(
+                query=query,
+                marketplace="Vinted",
+                min_price=None,
+                max_price=profile.all_in_price_max,
+                condition="Any",
+                excluded_keywords=profile.excluded_keywords,
+                refresh_interval_minutes=5,
+            )
+
+            self.config_manager.add_saved_search(search)
+
+            if self.search_manager.refresh_search(search, manual=True):
+                started += 1
+
+        self._refresh_saved_searches()
+        self._refresh_runtime_stats()
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text(
+                f"Started {started} Vinted RAM search(es). Queries are batched to avoid rate limits."
+            )
+
+    def _on_ram_hunt_open_all_clicked(self, _button: Gtk.Button) -> None:
+        profile = self._current_ram_hunt_profile()
+        urls = self.ram_hunt_service.browser_urls(profile)
+
+        for _marketplace, _label, url in urls:
+            webbrowser.open(url)
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text(
+                f"Opened {len(urls)} marketplace/reference searches in browser. Facebook is handoff only."
+            )
+
+    def _on_ram_hunt_copy_message_clicked(self, _button: Gtk.Button) -> None:
+        profile = self._current_ram_hunt_profile()
+        copied = self._copy_text_to_clipboard(self.ram_hunt_service.seller_message(profile))
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text(
+                "RAM seller message copied to clipboard." if copied else "Could not copy seller message."
+            )
+
+    def _on_ram_hunt_apply_builder_clicked(self, _button: Gtk.Button) -> None:
+        profile = self._current_ram_hunt_profile()
+        target = (
+            "Temporary desktop DDR5 test stick"
+            if profile.mode == "Temporary Test Stick"
+            else f"{profile.capacity_gb}GB {profile.module_config} DDR5-{profile.min_speed} CL{profile.max_cas_latency} EXPO"
+        )
+
+        with self.pc_builder_service.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE build_parts
+                SET target = ?, budget = ?, status = 'Needed', notes = ?
+                WHERE part_type = 'RAM'
+                """,
+                (
+                    target,
+                    profile.all_in_price_max,
+                    f"RAM Hunt profile: {profile.mode}. Deadline: {profile.deadline}.",
+                ),
+            )
+            connection.commit()
+
+        self._refresh_pc_builder()
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text("PC Builder RAM row updated from RAM Hunt profile.")
+
+    def _on_ram_hunt_mark_bought_clicked(self, _button: Gtk.Button) -> None:
+        profile = self._current_ram_hunt_profile()
+
+        with self.pc_builder_service.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE build_parts
+                SET status = 'Bought', bought_price = budget, notes = ?
+                WHERE part_type = 'RAM'
+                """,
+                (
+                    f"Marked bought from RAM Hunt. Urgent notifications should stop for final RAM. Profile: {profile.mode}.",
+                ),
+            )
+            connection.commit()
+
+        self._refresh_pc_builder()
+
+        if hasattr(self, "ram_hunt_banner_label"):
+            self.ram_hunt_banner_label.set_text("RAM marked as bought in PC Builder. Pause urgent RAM searches manually if needed.")
+
 
     def _build_live_deals_page(self) -> Gtk.Widget:
         page = self._page_container()

@@ -109,6 +109,35 @@ class DatabaseManager:
 
                 CREATE INDEX IF NOT EXISTS idx_price_snapshots_captured_at
                 ON price_snapshots(captured_at);
+
+                CREATE TABLE IF NOT EXISTS ram_hunt_profiles (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    mode TEXT NOT NULL DEFAULT 'Final 32GB Kit',
+                    capacity_gb INTEGER NOT NULL DEFAULT 32,
+                    module_config TEXT NOT NULL DEFAULT '2x16GB',
+                    memory_type TEXT NOT NULL DEFAULT 'DDR5',
+                    min_speed INTEGER NOT NULL DEFAULT 6000,
+                    max_speed INTEGER NOT NULL DEFAULT 7200,
+                    max_cas_latency INTEGER NOT NULL DEFAULT 36,
+                    expo_preferred INTEGER NOT NULL DEFAULT 1,
+                    allow_xmp INTEGER NOT NULL DEFAULT 1,
+                    rgb TEXT NOT NULL DEFAULT 'Any',
+                    condition TEXT NOT NULL DEFAULT 'Either',
+                    delivery_mode TEXT NOT NULL DEFAULT 'Delivery or collection',
+                    collection_distance_miles INTEGER NOT NULL DEFAULT 25,
+                    item_price_max REAL NOT NULL DEFAULT 180,
+                    all_in_price_max REAL NOT NULL DEFAULT 200,
+                    deadline TEXT NOT NULL DEFAULT '2026-07-14',
+                    urgent INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS ram_hunt_notifications (
+                    listing_key TEXT PRIMARY KEY,
+                    notified_at TEXT NOT NULL,
+                    score INTEGER NOT NULL DEFAULT 0,
+                    profile_mode TEXT NOT NULL DEFAULT ''
+                );
                 """
             )
 
