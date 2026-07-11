@@ -342,8 +342,8 @@ class PCBuilderService:
 
         cpu_low, cpu_high, cpu_note = self._estimate_cpu_value(combined)
         gpu_low, gpu_high, gpu_note = self._estimate_gpu_value(combined)
-        ram_low, ram_high, ram_note = self._estimate_ram_value(combined)
-        storage_low, storage_high, storage_note = self._estimate_storage_value(combined)
+        ram_low, ram_high, ram_note = self._estimate_ram_value(current_pc.memory)
+        storage_low, storage_high, storage_note = self._estimate_storage_value(current_pc.storage)
         base_low, base_high, base_note = self._estimate_base_system_value(combined)
 
         for low, high, note in [

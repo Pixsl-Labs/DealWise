@@ -19,6 +19,55 @@ class ListingDecision:
     seller_message: str
 
 
+def buyer_risk_flags(text: str) -> list[str]:
+    lower = text.lower()
+    flags: list[str] = []
+
+    checks = [
+        ("photo is not the actual item", ["not the one", "not the actual", "picture is not", "photo is not"]),
+        ("seller says the situation may look suspicious", ["looks scummy", "sounds dodgy", "look dodgy"]),
+        ("limited testing window", ["test once", "only once", "thermal paste", "won't be able to put it back"]),
+        ("CPU has been swapped/tested multiple times", ["swap out the cpu", "swapped out the cpu", "multiple times"]),
+        ("OEM/tray/AliExpress comparison mentioned", ["ali express", "aliexpress", "oem tray", "tray ones"]),
+        ("needs proof of current ownership", ["date", "username", "piece of paper"]),
+    ]
+
+    for label, terms in checks:
+        if any(term in lower for term in terms):
+            flags.append(label)
+
+    return flags
+
+
+def buyer_evidence_checklist(part_type: str) -> list[str]:
+    part = part_type.lower()
+
+    if part == "cpu":
+        return [
+            "Photo of the actual CPU next to today's date and seller username.",
+            "Close-up of the front so the model and OPN/serial area are readable.",
+            "Clear photo of the back/contact pads.",
+            "BIOS, CPU-Z, HWiNFO, lscpu or /proc/cpuinfo showing the exact CPU detected.",
+            "Prefer one short video connecting the proof together if the story is complicated.",
+        ]
+
+    if part == "gpu":
+        return [
+            "Photo of the actual GPU next to today's date and seller username.",
+            "GPU-Z or system screenshot showing the exact GPU.",
+            "Short video/photo showing it running.",
+            "Confirmation there is no artifacting, overheating or fan issue.",
+            "Ask whether it has been mined on if relevant.",
+        ]
+
+    return [
+        "Photo of the actual item with today's date and seller username.",
+        "Proof the item works.",
+        "Clear photos of labels, serial/model details and condition.",
+        "Any missing parts or known issues confirmed in writing.",
+    ]
+
+
 class ListingIntelligenceService:
     """Explainable local listing scoring.
 
@@ -37,6 +86,7 @@ class ListingIntelligenceService:
         safe_part_type = part_type or infer_part_type(title)
         lower_title = title.lower()
         reasoning: list[str] = []
+        buyer_flags = buyer_risk_flags(title)
 
         expected_low, expected_high, matched_model = self._expected_price_range(lower_title, safe_part_type)
 
@@ -115,6 +165,12 @@ class ListingIntelligenceService:
         if marketplace.lower() == "manual":
             evidence_confidence -= 5
             reasoning.append("Manual listing input needs extra evidence before buying.")
+
+        if buyer_flags:
+            scam_risk += min(3.0, len(buyer_flags) * 0.8)
+            evidence_confidence -= min(25, len(buyer_flags) * 6)
+            deal_score -= min(12, len(buyer_flags) * 3)
+            reasoning.append("Buyer evidence flags: " + ", ".join(buyer_flags[:3]) + ".")
 
         deal_score = clamp_int(deal_score, 0, 100)
         build_fit = clamp_int(build_fit, 0, 100)
@@ -214,7 +270,7 @@ class ListingIntelligenceService:
         decision: str,
         tone: str = "friendly",
     ) -> str:
-        evidence_lines = evidence_for_part(part_type)
+        evidence_lines = buyer_evidence_checklist(part_type)
         evidence_text = "\n".join(f"- {line}" for line in evidence_lines)
 
         if decision == "NEGOTIATE":

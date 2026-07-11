@@ -326,7 +326,7 @@ class ListingRepository:
             rows = connection.execute(
                 """
                 SELECT * FROM listings
-                WHERE status IN ('Watching', 'Favourite', 'Bought', 'Negotiating')
+                WHERE status IN ('Watching', 'Favourite', 'Bought', 'Negotiating', 'Evidence Requested', 'Buying Candidate')
                 ORDER BY last_seen_at DESC
                 LIMIT ?
                 """,

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.4] - 2026-07-11
+
+### Added
+
+- Buyer evidence/risk flags for suspicious private-sale wording.
+- CPU-specific evidence checklist for safer marketplace buying.
+- Evidence Requested listing status.
+- Buying Candidate listing status.
+- Listing Checker can now use seller chat notes as risk context.
+
+### Fixed
+
+- Dashboard text now reflects Phase 6 instead of old Phase 3 wording.
+- RAM resale estimate no longer reads storage capacity as memory capacity.
+- Saved/favourited listing workflow includes evidence and buying-candidate states.
+
+### Notes
+
+- README intentionally not changed.
+
 ## [0.6.2] - 2026-07-10
 
 ### Fixed

@@ -352,7 +352,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("Dashboard"))
         page.append(
             self._muted_label(
-                "Phase 3 foundation is active: SQLite persistence, saved listings, PC Builder, inxi import, listing checker, and seller message generation."
+                "Phase 6 is active: saved listings, PC Builder, compatibility checks, buyer evidence checks, price history learning, and marketplace deal scoring."
             )
         )
 
@@ -379,13 +379,13 @@ class MainWindow(Gtk.ApplicationWindow):
             card_grid.attach(card, index % 3, index // 3, 1, 1)
 
         section = self._section_card(
-            "Phase 3 Status",
+            "DealWise Status",
             [
                 "SQLite database is active under ~/.config/Pixsl-Labs/DealWise/database/dealwise.db.",
                 "Marketplace results are now persisted and deduplicated.",
                 "PC Builder can import current PC information with inxi -Fx.",
                 "Listing Checker can create manual listings and generate seller messages.",
-                "Advanced scoring is intentionally placeholder-level and explainable for now.",
+                "Deal scoring now combines rough market ranges, local price history, compatibility notes and buyer-evidence checks.",
             ],
         )
         section.set_margin_top(18)
@@ -687,7 +687,7 @@ class MainWindow(Gtk.ApplicationWindow):
         page.append(self._heading("Listing Checker"))
         page.append(
             self._muted_label(
-                "Paste a listing manually to save it, get placeholder scores, and generate a safer seller message."
+                "Paste a listing, price, and any seller chat notes. DealWise will flag evidence/risk issues and generate a safer seller message."
             )
         )
 
@@ -865,7 +865,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 [
                     "Linux-first marketplace intelligence desktop app.",
                     "Built for PC hardware deal tracking, price analysis, scam detection, and upgrade planning.",
-                    "Current version activates Phase 3 foundations.",
+                    "Current version activates Phase 6 foundations.",
                 ],
             )
         )
@@ -1215,10 +1215,10 @@ class MainWindow(Gtk.ApplicationWindow):
             f"Build Fit: {decision.build_fit}/100",
             f"Budget Fit: {decision.budget_fit}/100",
             f"Evidence Confidence: {decision.evidence_confidence}/100",
-            "Reasoning:",
+            "Reasoning / Risk Flags:",
             *[f"- {reason}" for reason in decision.reasoning],
             "",
-            "Seller Message:",
+            "Seller Message / Evidence Request:",
             decision.seller_message,
         ]
 
@@ -1700,6 +1700,12 @@ class MainWindow(Gtk.ApplicationWindow):
         bought_button = Gtk.Button(label="Bought")
         bought_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Bought")
 
+        evidence_button = Gtk.Button(label="Evidence Requested")
+        evidence_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Evidence Requested")
+
+        candidate_button = Gtk.Button(label="Buying Candidate")
+        candidate_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Buying Candidate")
+
         avoid_button = Gtk.Button(label="Avoid")
         avoid_button.connect("clicked", self._on_status_clicked, listing.dedupe_key, "Avoided")
 
@@ -1715,6 +1721,8 @@ class MainWindow(Gtk.ApplicationWindow):
         button_row.append(fav_button)
         button_row.append(watch_button)
         button_row.append(bought_button)
+        button_row.append(evidence_button)
+        button_row.append(candidate_button)
         button_row.append(avoid_button)
         button_row.append(remove_button)
         button_row.append(open_button)
