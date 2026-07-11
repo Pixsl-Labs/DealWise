@@ -598,7 +598,7 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.set_margin_end(14)
 
         self.live_search_entry = Gtk.Entry()
-        self.live_search_entry.set_placeholder_text("Search shown deals, e.g. RX 6800, Ryzen 7700, full PC")
+        self.live_search_entry.set_placeholder_text("Optional: search shown deals, e.g. RX 6800, Ryzen 7700, full PC")
         self.live_search_entry.connect("changed", self._on_live_filter_debounced)
 
         self.live_focus_dropdown = Gtk.DropDown.new_from_strings(
@@ -645,7 +645,7 @@ class MainWindow(Gtk.ApplicationWindow):
         clear_filters_button = Gtk.Button(label="Clear Filters")
         clear_filters_button.connect("clicked", self._on_clear_live_filters_clicked)
 
-        search_text_button = Gtk.Button(label="Search This Text")
+        search_text_button = Gtk.Button(label="Search Selected Filter")
         search_text_button.connect("clicked", self._on_search_live_text_clicked)
 
         filter_grid.attach(self._form_label("Search"), 0, 0, 1, 1)
@@ -1310,17 +1310,44 @@ class MainWindow(Gtk.ApplicationWindow):
             self._worth_live_expanded = self.worth_live_expander.get_expanded()
 
         stats = self.search_manager.get_stats()
-        favourites = self._filter_stored_live_results(self.listing_repository.list_favourites(limit=25))
-        results = self.search_manager.get_live_results(limit=150)
-        hidden_results = self.search_manager.get_hidden_results(limit=100) if hasattr(self.search_manager, "get_hidden_results") else []
-        filtered_results = self._filter_and_sort_live_results(results)
+
+        favourites = self._filter_stored_live_results(
+            self.listing_repository.list_favourites(limit=25)
+        )
+
+        live_results = self.search_manager.get_live_results(limit=200)
+        filtered_live_results = self._filter_and_sort_live_results(live_results)
+
+        hidden_results = []
+        hidden_keys: set[str] = set()
+
+        if hasattr(self.search_manager, "get_hidden_results"):
+            hidden_results = self.search_manager.get_hidden_results(limit=100)
+            hidden_keys = {listing.dedupe_key for listing in hidden_results}
+
+        live_keys = {listing.dedupe_key for listing in filtered_live_results}
+
+        database_results = self._filter_and_sort_stored_results(
+            self.listing_repository.list_recent(limit=250),
+            excluded_keys=live_keys | hidden_keys,
+        )
+
+        total_visible = len(filtered_live_results) + len(database_results)
 
         if hasattr(self, "live_status_label"):
             self.live_status_label.set_text(
-                f"{stats.connector_status} Showing {len(filtered_results)} filtered result(s). Hidden: {len(hidden_results)}."
+                f"{stats.connector_status} Showing {total_visible} result(s): "
+                f"{len(filtered_live_results)} live, {len(database_results)} from database. "
+                f"Hidden: {len(hidden_results)}."
             )
 
-        signature = self._live_signature("", favourites, filtered_results) + "|hidden=" + ",".join(item.dedupe_key for item in hidden_results)
+        signature = "|".join(
+            [
+                self._live_signature("", favourites, filtered_live_results),
+                "db=" + ",".join(f"{listing.dedupe_key}:{listing.status}:{listing.price}" for listing in database_results),
+                "hidden=" + ",".join(listing.dedupe_key for listing in hidden_results),
+            ]
+        )
 
         if not force and signature == self._live_render_signature:
             return True
@@ -1332,11 +1359,14 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if hasattr(self, "hidden_live_list"):
             self._clear_listbox(self.hidden_live_list)
+
             if hidden_results:
                 for listing in hidden_results:
                     self.hidden_live_list.append(self._hidden_listing_row(listing))
             else:
-                self.hidden_live_list.append(self._simple_row("No hidden deals. Removed live deals will appear here so they can be restored."))
+                self.hidden_live_list.append(
+                    self._simple_row("No hidden deals. Removed live deals will appear here so they can be restored.")
+                )
 
         if not favourites:
             self.saved_live_list.append(
@@ -1346,14 +1376,18 @@ class MainWindow(Gtk.ApplicationWindow):
             for listing in favourites:
                 self.saved_live_list.append(self._stored_listing_row(listing))
 
-        if not filtered_results:
+        if not filtered_live_results and not database_results:
             self.worth_live_list.append(
-                self._simple_row("No results match the current filters. Try searching less specifically, choose All Live Deals, clear max price, or run Search Needed Parts.")
+                self._simple_row(
+                    "No results match the current filters. For PSU or motherboard hunting, choose Part/Product then click Search Selected Filter."
+                )
             )
-            return True
+        else:
+            for listing in filtered_live_results:
+                self.worth_live_list.append(self._listing_row(listing))
 
-        for listing in filtered_results:
-            self.worth_live_list.append(self._listing_row(listing))
+            for listing in database_results:
+                self.worth_live_list.append(self._stored_listing_row(listing))
 
         if hasattr(self, "saved_live_expander"):
             self.saved_live_expander.set_expanded(self._saved_live_expanded)
@@ -2085,15 +2119,60 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_product_dropdown.set_model(Gtk.StringList.new(options))
         self.live_product_dropdown.set_selected(0)
 
-    def _on_search_live_text_clicked(self, _button: Gtk.Button) -> None:
-        if not hasattr(self, "live_search_entry"):
-            return
+    def _current_live_search_query(self) -> str:
+        typed_query = self.live_search_entry.get_text().strip() if hasattr(self, "live_search_entry") else ""
 
-        query = self.live_search_entry.get_text().strip()
+        if typed_query:
+            return typed_query
+
+        product = self._current_product_filter() if hasattr(self, "live_product_dropdown") else "Any Product"
+        part = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
+
+        if product and not product.startswith("Any "):
+            if part == "PSU" and "psu" not in product.lower():
+                return f"{product} PSU"
+            if part == "Motherboard" and "motherboard" not in product.lower():
+                return f"{product} motherboard"
+            if part == "Storage" and "ssd" not in product.lower() and "nvme" not in product.lower():
+                return f"{product} SSD"
+            return product
+
+        selected_targets = {
+            build_part.part_type: build_part.target
+            for build_part in self.pc_builder_service.list_build_parts()
+        }
+
+        fallback_by_part = {
+            "PSU": selected_targets.get("PSU") or "750W Gold PSU",
+            "Motherboard": selected_targets.get("Motherboard") or "B650 motherboard",
+            "GPU": selected_targets.get("GPU") or "RX 6800",
+            "CPU": selected_targets.get("CPU") or "Ryzen 7 7800X3D",
+            "RAM": selected_targets.get("RAM") or "32GB DDR5",
+            "Storage": selected_targets.get("Storage") or "2TB NVMe SSD",
+            "Case": selected_targets.get("Case") or "ATX airflow case",
+            "Cooling": selected_targets.get("Cooling") or "Thermalright CPU cooler",
+            "Full PC": "AM5 gaming PC",
+        }
+
+        query = fallback_by_part.get(part, "")
+
+        if part == "PSU" and query and "psu" not in query.lower() and "power supply" not in query.lower():
+            query = f"{query} PSU"
+
+        if part == "Motherboard" and query and "motherboard" not in query.lower():
+            query = f"{query} motherboard"
+
+        if part == "Storage" and query and "ssd" not in query.lower() and "nvme" not in query.lower():
+            query = f"{query} SSD"
+
+        return query.strip()
+
+    def _on_search_live_text_clicked(self, _button: Gtk.Button) -> None:
+        query = self._current_live_search_query()
 
         if not query:
             if hasattr(self, "live_status_label"):
-                self.live_status_label.set_text("Type something in Live Deals search first.")
+                self.live_status_label.set_text("Choose a Part/Product or type a search first.")
             return
 
         search = SavedSearch.create(
@@ -2105,6 +2184,8 @@ class MainWindow(Gtk.ApplicationWindow):
             excluded_keywords=[
                 "broken",
                 "faulty",
+                "spares",
+                "repair",
                 "wanted",
                 "laptop",
                 "notebook",
@@ -2114,6 +2195,8 @@ class MainWindow(Gtk.ApplicationWindow):
                 "tablet",
                 "camera",
                 "airpods",
+                "enclosure",
+                "external",
             ],
             refresh_interval_minutes=5,
         )
@@ -2346,6 +2429,54 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_product_dropdown.set_model(Gtk.StringList.new(options))
         self.live_product_dropdown.set_selected(0)
 
+    def _current_live_search_query(self) -> str:
+        typed_query = self.live_search_entry.get_text().strip() if hasattr(self, "live_search_entry") else ""
+
+        if typed_query:
+            return typed_query
+
+        product = self._current_product_filter() if hasattr(self, "live_product_dropdown") else "Any Product"
+        part = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
+
+        if product and not product.startswith("Any "):
+            if part == "PSU" and "psu" not in product.lower():
+                return f"{product} PSU"
+            if part == "Motherboard" and "motherboard" not in product.lower():
+                return f"{product} motherboard"
+            if part == "Storage" and "ssd" not in product.lower() and "nvme" not in product.lower():
+                return f"{product} SSD"
+            return product
+
+        selected_targets = {
+            build_part.part_type: build_part.target
+            for build_part in self.pc_builder_service.list_build_parts()
+        }
+
+        fallback_by_part = {
+            "PSU": selected_targets.get("PSU") or "750W Gold PSU",
+            "Motherboard": selected_targets.get("Motherboard") or "B650 motherboard",
+            "GPU": selected_targets.get("GPU") or "RX 6800",
+            "CPU": selected_targets.get("CPU") or "Ryzen 7 7800X3D",
+            "RAM": selected_targets.get("RAM") or "32GB DDR5",
+            "Storage": selected_targets.get("Storage") or "2TB NVMe SSD",
+            "Case": selected_targets.get("Case") or "ATX airflow case",
+            "Cooling": selected_targets.get("Cooling") or "Thermalright CPU cooler",
+            "Full PC": "AM5 gaming PC",
+        }
+
+        query = fallback_by_part.get(part, "")
+
+        if part == "PSU" and query and "psu" not in query.lower() and "power supply" not in query.lower():
+            query = f"{query} PSU"
+
+        if part == "Motherboard" and query and "motherboard" not in query.lower():
+            query = f"{query} motherboard"
+
+        if part == "Storage" and query and "ssd" not in query.lower() and "nvme" not in query.lower():
+            query = f"{query} SSD"
+
+        return query.strip()
+
     def _on_search_live_text_clicked(self, _button: Gtk.Button) -> None:
         if not hasattr(self, "live_search_entry"):
             return
@@ -2456,6 +2587,75 @@ class MainWindow(Gtk.ApplicationWindow):
             return False
 
         return True
+
+    def _filter_and_sort_stored_results(
+        self,
+        listings: list[StoredListing],
+        excluded_keys: set[str] | None = None,
+    ) -> list[StoredListing]:
+        excluded_keys = excluded_keys or set()
+        saved_statuses = {
+            "Watching",
+            "Favourite",
+            "Bought",
+            "Negotiating",
+            "Evidence Requested",
+            "Buying Candidate",
+        }
+
+        filtered = self._filter_stored_live_results(
+            [
+                listing
+                for listing in listings
+                if listing.dedupe_key not in excluded_keys
+                and listing.status not in saved_statuses
+            ]
+        )
+
+        if hasattr(self, "live_hide_high_scam_check") and self.live_hide_high_scam_check.get_active():
+            filtered = [
+                listing
+                for listing in filtered
+                if self._analyse_stored_listing_with_history(listing).scam_risk < 6
+            ]
+
+        sort_mode = self._dropdown_text(self.live_sort_dropdown) if hasattr(self, "live_sort_dropdown") else "Newest First"
+
+        def price_value(listing: StoredListing) -> float:
+            return listing.price if listing.price is not None else 999999
+
+        if sort_mode == "Lowest Price":
+            filtered.sort(key=price_value)
+        elif sort_mode == "Highest Price":
+            filtered.sort(key=price_value, reverse=True)
+        elif sort_mode == "Highest Deal Score":
+            filtered.sort(
+                key=lambda listing: self._analyse_stored_listing_with_history(listing).deal_score,
+                reverse=True,
+            )
+        elif sort_mode == "Lowest Scam Risk":
+            filtered.sort(
+                key=lambda listing: self._analyse_stored_listing_with_history(listing).scam_risk
+            )
+        elif sort_mode == "Highest Build Fit":
+            filtered.sort(
+                key=lambda listing: self._analyse_stored_listing_with_history(listing).build_fit,
+                reverse=True,
+            )
+        elif sort_mode == "Highest Evidence Confidence":
+            filtered.sort(
+                key=lambda listing: self._analyse_stored_listing_with_history(listing).evidence_confidence,
+                reverse=True,
+            )
+        elif sort_mode == "Lowest Historical Price":
+            filtered.sort(
+                key=lambda listing: self._historical_price_rank(listing.title, listing.price),
+                reverse=True,
+            )
+        else:
+            filtered.sort(key=lambda listing: listing.last_seen_at, reverse=True)
+
+        return filtered
 
     def _filter_stored_live_results(self, listings: list[StoredListing]) -> list[StoredListing]:
         search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""

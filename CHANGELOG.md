@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.1] - 2026-07-11
+
+### Fixed
+
+- Live Deals now renders matching database-backed listings as well as current in-memory live results.
+- Fixed confusing empty Live Deals view where the status said filtered results existed but no cards appeared.
+- Hidden Deals no longer causes database-backed results to reappear in the main list.
+- Live Deals status now separates live result count, database fallback count and hidden count.
+
+### Added
+
+- Search Selected Filter behaviour for Live Deals.
+- If the search box is empty, DealWise now searches using the selected Product or selected PC Builder part target.
+- PSU searches automatically add PSU wording when needed.
+- Motherboard searches automatically add motherboard wording when needed.
+
+### Notes
+
+- README intentionally not changed.
+- This is a polish fix before moving on to more marketplace connectors.
+
 ## [0.7.0] - 2026-07-11
 
 ### Added
