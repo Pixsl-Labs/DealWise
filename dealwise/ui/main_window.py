@@ -552,7 +552,7 @@ class MainWindow(Gtk.ApplicationWindow):
         title_box.append(self._heading("Live Deals"))
         title_box.append(
             self._muted_label(
-                "Search, filter, sort and compare live marketplace results. Phase 6 price history now improves deal scoring as DealWise learns from seen listings."
+                "Search, filter, sort and compare live marketplace results. Results now appear above saved deals."
             )
         )
 
@@ -583,6 +583,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_status_label = self._muted_label("Waiting for saved searches...")
         status_box.append(self.live_status_label)
+
+        self.live_results_hint_label = self._muted_label("Tip: choose Part/Product or use Search Selected Filter for focused results.")
+        status_box.append(self.live_results_hint_label)
+
         status_card.set_child(status_box)
         page.append(status_card)
 
@@ -634,6 +638,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 "Lowest Historical Price",
             ]
         )
+        self.live_sort_dropdown.connect("notify::selected", self._on_live_filter_debounced)
 
         self.live_max_price_input = Gtk.SpinButton.new_with_range(0, 100000, 5)
         self.live_max_price_input.set_tooltip_text("0 means no max price filter")
@@ -675,21 +680,12 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_expander.set_child(filter_card)
         page.append(filter_expander)
 
-        self._saved_live_expanded = getattr(self, "_saved_live_expanded", True)
-        self._worth_live_expanded = getattr(self, "_worth_live_expanded", True)
+        self._saved_live_expanded = False
+        self._worth_live_expanded = True
 
-        self.saved_live_expander = Gtk.Expander(label="Saved / Favourited Deals")
-        self.saved_live_expander.set_expanded(self._saved_live_expanded)
-        self.saved_live_expander.set_margin_top(16)
-        self.saved_live_expander.connect("notify::expanded", self._on_saved_live_expanded_changed)
-
-        self.saved_live_list = Gtk.ListBox()
-        self.saved_live_list.add_css_class("saved-search-list")
-        self.saved_live_expander.set_child(self.saved_live_list)
-        page.append(self.saved_live_expander)
-
+        # Results first. Saved deals underneath.
         self.worth_live_expander = Gtk.Expander(label="New / Worth Checking")
-        self.worth_live_expander.set_expanded(self._worth_live_expanded)
+        self.worth_live_expander.set_expanded(True)
         self.worth_live_expander.set_margin_top(16)
         self.worth_live_expander.connect("notify::expanded", self._on_worth_live_expanded_changed)
 
@@ -697,6 +693,16 @@ class MainWindow(Gtk.ApplicationWindow):
         self.worth_live_list.add_css_class("saved-search-list")
         self.worth_live_expander.set_child(self.worth_live_list)
         page.append(self.worth_live_expander)
+
+        self.saved_live_expander = Gtk.Expander(label="Saved / Favourited Deals")
+        self.saved_live_expander.set_expanded(False)
+        self.saved_live_expander.set_margin_top(16)
+        self.saved_live_expander.connect("notify::expanded", self._on_saved_live_expanded_changed)
+
+        self.saved_live_list = Gtk.ListBox()
+        self.saved_live_list.add_css_class("saved-search-list")
+        self.saved_live_expander.set_child(self.saved_live_list)
+        page.append(self.saved_live_expander)
 
         self.hidden_live_expander = Gtk.Expander(label="Hidden Deals")
         self.hidden_live_expander.set_expanded(False)
@@ -932,13 +938,14 @@ class MainWindow(Gtk.ApplicationWindow):
             self.stack.set_visible_child_name(page_id)
 
     def _on_view_live_results_clicked(self, _button: Gtk.Button) -> None:
+        self._worth_live_expanded = True
+        self._saved_live_expanded = False
+
         if hasattr(self, "worth_live_expander"):
             self.worth_live_expander.set_expanded(True)
-            self._worth_live_expanded = True
 
         if hasattr(self, "saved_live_expander"):
             self.saved_live_expander.set_expanded(False)
-            self._saved_live_expanded = False
 
     def _on_saved_live_expanded_changed(self, *_args) -> None:
         if hasattr(self, "saved_live_expander"):
@@ -1346,8 +1353,8 @@ class MainWindow(Gtk.ApplicationWindow):
         visible_database_results = database_results[:remaining_slots]
         rendered_count = len(visible_live_results) + len(visible_database_results)
 
-        # Saved deals should not dominate the page when new results exist.
-        if total_visible > 0 and not force:
+        # Hard UX rule: if there are search results, results section is open and saved is closed.
+        if total_visible > 0:
             self._worth_live_expanded = True
             self._saved_live_expanded = False
         else:
@@ -1365,6 +1372,16 @@ class MainWindow(Gtk.ApplicationWindow):
 
         if hasattr(self, "hidden_live_expander"):
             self.hidden_live_expander.set_label(f"Hidden Deals ({len(hidden_results)})")
+
+        if hasattr(self, "live_results_hint_label"):
+            if total_visible > 0:
+                self.live_results_hint_label.set_text(
+                    "Results are shown below filters. Saved deals are collapsed underneath so they do not hide fresh matches."
+                )
+            else:
+                self.live_results_hint_label.set_text(
+                    "No visible matches yet. Choose Part/Product, use Search Selected Filter, or Clear Filters."
+                )
 
         if hasattr(self, "live_status_label"):
             if total_visible > max_cards:
@@ -1388,6 +1405,10 @@ class MainWindow(Gtk.ApplicationWindow):
         )
 
         if not force and signature == self._live_render_signature:
+            if hasattr(self, "worth_live_expander") and total_visible > 0:
+                self.worth_live_expander.set_expanded(True)
+            if hasattr(self, "saved_live_expander") and total_visible > 0:
+                self.saved_live_expander.set_expanded(False)
             return True
 
         self._live_render_signature = signature
@@ -1405,17 +1426,6 @@ class MainWindow(Gtk.ApplicationWindow):
                 self.hidden_live_list.append(
                     self._simple_row("No hidden deals. Removed live deals will appear here so they can be restored.")
                 )
-
-        if not favourites:
-            self.saved_live_list.append(
-                self._simple_row("No saved deals match the current filters. Clear filters to see all saved deals.")
-            )
-        else:
-            self.saved_live_list.append(
-                self._simple_row("Saved deals are collapsed by default when new results exist, so they do not hide fresh results.")
-            )
-            for listing in favourites:
-                self.saved_live_list.append(self._stored_listing_row(listing))
 
         if not visible_live_results and not visible_database_results:
             self.worth_live_list.append(
@@ -1437,11 +1447,19 @@ class MainWindow(Gtk.ApplicationWindow):
             for listing in visible_database_results:
                 self.worth_live_list.append(self._stored_listing_row(listing))
 
-        if hasattr(self, "saved_live_expander"):
-            self.saved_live_expander.set_expanded(self._saved_live_expanded)
+        if not favourites:
+            self.saved_live_list.append(
+                self._simple_row("No saved deals match the current filters. Clear filters to see all saved deals.")
+            )
+        else:
+            for listing in favourites:
+                self.saved_live_list.append(self._stored_listing_row(listing))
 
         if hasattr(self, "worth_live_expander"):
             self.worth_live_expander.set_expanded(self._worth_live_expanded)
+
+        if hasattr(self, "saved_live_expander"):
+            self.saved_live_expander.set_expanded(self._saved_live_expanded)
 
         return True
 

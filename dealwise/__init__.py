@@ -2,4 +2,4 @@
 
 APP_NAME = "DealWise"
 APP_ID = "com.pixsllabs.DealWise"
-APP_VERSION = "0.7.2"
+APP_VERSION = "0.7.3"
