@@ -562,9 +562,13 @@ class MainWindow(Gtk.ApplicationWindow):
         refresh_button = Gtk.Button(label="Search Now")
         refresh_button.connect("clicked", self._on_manual_refresh_clicked)
 
+        view_results_button = Gtk.Button(label="View Results")
+        view_results_button.connect("clicked", self._on_view_live_results_clicked)
+
         top_row.append(title_box)
         top_row.append(search_parts_button)
         top_row.append(refresh_button)
+        top_row.append(view_results_button)
         page.append(top_row)
 
         status_card = Gtk.Frame()
@@ -926,6 +930,15 @@ class MainWindow(Gtk.ApplicationWindow):
         page_id = getattr(row, "page_id", None)
         if page_id is not None:
             self.stack.set_visible_child_name(page_id)
+
+    def _on_view_live_results_clicked(self, _button: Gtk.Button) -> None:
+        if hasattr(self, "worth_live_expander"):
+            self.worth_live_expander.set_expanded(True)
+            self._worth_live_expanded = True
+
+        if hasattr(self, "saved_live_expander"):
+            self.saved_live_expander.set_expanded(False)
+            self._saved_live_expanded = False
 
     def _on_saved_live_expanded_changed(self, *_args) -> None:
         if hasattr(self, "saved_live_expander"):
@@ -1303,19 +1316,13 @@ class MainWindow(Gtk.ApplicationWindow):
         if not hasattr(self, "worth_live_list"):
             return True
 
-        if hasattr(self, "saved_live_expander"):
-            self._saved_live_expanded = self.saved_live_expander.get_expanded()
-
-        if hasattr(self, "worth_live_expander"):
-            self._worth_live_expanded = self.worth_live_expander.get_expanded()
-
         stats = self.search_manager.get_stats()
 
         favourites = self._filter_stored_live_results(
             self.listing_repository.list_favourites(limit=25)
         )
 
-        live_results = self.search_manager.get_live_results(limit=200)
+        live_results = self.search_manager.get_live_results(limit=250)
         filtered_live_results = self._filter_and_sort_live_results(live_results)
 
         hidden_results = []
@@ -1328,24 +1335,55 @@ class MainWindow(Gtk.ApplicationWindow):
         live_keys = {listing.dedupe_key for listing in filtered_live_results}
 
         database_results = self._filter_and_sort_stored_results(
-            self.listing_repository.list_recent(limit=250),
+            self.listing_repository.list_recent(limit=300),
             excluded_keys=live_keys | hidden_keys,
         )
 
         total_visible = len(filtered_live_results) + len(database_results)
+        max_cards = 60
+        visible_live_results = filtered_live_results[:max_cards]
+        remaining_slots = max(0, max_cards - len(visible_live_results))
+        visible_database_results = database_results[:remaining_slots]
+        rendered_count = len(visible_live_results) + len(visible_database_results)
+
+        # Saved deals should not dominate the page when new results exist.
+        if total_visible > 0 and not force:
+            self._worth_live_expanded = True
+            self._saved_live_expanded = False
+        else:
+            if hasattr(self, "saved_live_expander"):
+                self._saved_live_expanded = self.saved_live_expander.get_expanded()
+
+            if hasattr(self, "worth_live_expander"):
+                self._worth_live_expanded = self.worth_live_expander.get_expanded()
+
+        if hasattr(self, "saved_live_expander"):
+            self.saved_live_expander.set_label(f"Saved / Favourited Deals ({len(favourites)})")
+
+        if hasattr(self, "worth_live_expander"):
+            self.worth_live_expander.set_label(f"New / Worth Checking ({total_visible})")
+
+        if hasattr(self, "hidden_live_expander"):
+            self.hidden_live_expander.set_label(f"Hidden Deals ({len(hidden_results)})")
 
         if hasattr(self, "live_status_label"):
+            if total_visible > max_cards:
+                shown_text = f"Showing first {max_cards} of {total_visible}"
+            else:
+                shown_text = f"Showing {total_visible}"
+
             self.live_status_label.set_text(
-                f"{stats.connector_status} Showing {total_visible} result(s): "
+                f"{stats.connector_status} {shown_text} result(s): "
                 f"{len(filtered_live_results)} live, {len(database_results)} from database. "
                 f"Hidden: {len(hidden_results)}."
             )
 
         signature = "|".join(
             [
-                self._live_signature("", favourites, filtered_live_results),
-                "db=" + ",".join(f"{listing.dedupe_key}:{listing.status}:{listing.price}" for listing in database_results),
+                self._live_signature("", favourites, visible_live_results),
+                "db=" + ",".join(f"{listing.dedupe_key}:{listing.status}:{listing.price}" for listing in visible_database_results),
                 "hidden=" + ",".join(listing.dedupe_key for listing in hidden_results),
+                f"counts={total_visible}:{len(favourites)}:{len(hidden_results)}",
             ]
         )
 
@@ -1373,20 +1411,30 @@ class MainWindow(Gtk.ApplicationWindow):
                 self._simple_row("No saved deals match the current filters. Clear filters to see all saved deals.")
             )
         else:
+            self.saved_live_list.append(
+                self._simple_row("Saved deals are collapsed by default when new results exist, so they do not hide fresh results.")
+            )
             for listing in favourites:
                 self.saved_live_list.append(self._stored_listing_row(listing))
 
-        if not filtered_live_results and not database_results:
+        if not visible_live_results and not visible_database_results:
             self.worth_live_list.append(
                 self._simple_row(
-                    "No results match the current filters. For PSU or motherboard hunting, choose Part/Product then click Search Selected Filter."
+                    "No results match the current filters. Pick Part/Product, click Search Selected Filter, or clear filters."
                 )
             )
         else:
-            for listing in filtered_live_results:
+            if total_visible > max_cards:
+                self.worth_live_list.append(
+                    self._simple_row(
+                        f"Showing first {rendered_count} of {total_visible} matching results. Narrow by Part, Product, Search, Max Price or Sort to reduce lag."
+                    )
+                )
+
+            for listing in visible_live_results:
                 self.worth_live_list.append(self._listing_row(listing))
 
-            for listing in database_results:
+            for listing in visible_database_results:
                 self.worth_live_list.append(self._stored_listing_row(listing))
 
         if hasattr(self, "saved_live_expander"):
@@ -2212,6 +2260,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_runtime_stats()
 
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
+        self._saved_live_expanded = False
+        self._worth_live_expanded = True
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
 
@@ -2521,6 +2571,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_runtime_stats()
 
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
+        self._saved_live_expanded = False
+        self._worth_live_expanded = True
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
 
@@ -3342,6 +3394,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _run_live_filter_refresh(self) -> bool:
         self._live_filter_timer_id = None
+        self._saved_live_expanded = False
+        self._worth_live_expanded = True
         self._live_render_signature = ""
         self._refresh_live_results(force=True)
         return False
