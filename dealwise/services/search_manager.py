@@ -137,6 +137,27 @@ class SearchManager:
 
         return True
 
+
+    def remove_live_results_by_predicate(self, predicate) -> int:
+        """Remove current in-memory live results matching predicate.
+
+        This never deletes SQLite listings or price history.
+        """
+
+        with self._lock:
+            before = len(self._live_results)
+            self._live_results = [
+                listing
+                for listing in self._live_results
+                if not predicate(listing)
+            ]
+            removed = before - len(self._live_results)
+
+            if removed:
+                self._connector_status = f"Cleared {removed} stale live result(s) from inactive/bought categories."
+
+            return removed
+
     def get_live_results(self, limit: int = 100) -> list[MarketplaceListing]:
         with self._lock:
             return list(self._live_results[:limit])

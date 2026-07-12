@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.8.2] - 2026-07-11
+
+### Added
+
+- Active Build Hunt service.
+- Centralised search eligibility rules.
+- Current real build seed data.
+- Bundle-aware motherboard + cooler purchase handling.
+- Active Build Hunt Live Deals mode.
+- Show Bought Categories toggle.
+- Clear Stale Live Results action.
+- GPU, RAM and Storage active search plan.
+- Bought-category saved-search pause handling.
+- Category-aware relevance filtering for GPU, RAM, Storage and PC cases.
+- Tests for active build status, bundle totals, bought filtering and relevance rules.
+
+### Fixed
+
+- Bought CPU, motherboard, cooling, PSU and case no longer appear in default Live Deals.
+- Search Needed Parts now only creates/refeshes searches for GPU, RAM and Storage.
+- Current RX 6400 and 512GB NVMe are treated as temporary parts with active upgrade hunts.
+- Motherboard + cooler bundle is counted once.
+- Generic case searches no longer accept scanner, phone, camera, carry or slide cases.
+- Historical listings and price snapshots are preserved when stale live results are cleared.
+
+### Notes
+
+- README intentionally not changed.
+- No new marketplace connector was added.
+- SQLite database is migrated safely in place.
+
 ## [0.8.0] - 2026-07-11
 
 ### Added

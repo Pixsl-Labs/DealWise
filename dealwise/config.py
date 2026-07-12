@@ -93,6 +93,9 @@ class ConfigManager:
             if not isinstance(raw_search, dict):
                 continue
 
+            if raw_search.get("paused_by_dealwise"):
+                continue
+
             searches.append(SavedSearch.from_dict(raw_search))
 
         return searches

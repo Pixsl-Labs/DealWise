@@ -16,6 +16,7 @@ from dealwise.repositories.listing_repository import ListingRepository, StoredLi
 from dealwise.services.listing_intelligence import ListingIntelligenceService
 from dealwise.services.pc_builder_service import PCBuilderService
 from dealwise.services.search_manager import SearchManager
+from dealwise.services.active_build import ActiveBuildService
 from dealwise.services.ram_hunt import RAMHuntProfile, RAMHuntService
 from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
@@ -211,6 +212,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.logger = logger
         self.listing_repository = listing_repository
         self.pc_builder_service = pc_builder_service
+        self.active_build_service = ActiveBuildService(self.pc_builder_service.database)
+        self.active_build_service.seed_current_real_build()
+        self.active_build_service.pause_obsolete_saved_searches(self.config_manager)
+        self.active_build_service.clear_stale_live_results(self.search_manager)
         self.listing_intelligence_service = listing_intelligence_service
 
         self.set_title(APP_NAME)
@@ -1041,7 +1046,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_search_entry.connect("changed", self._on_live_filter_debounced)
 
         self.live_focus_dropdown = Gtk.DropDown.new_from_strings(
-            ["All Live Deals", "Checklist Matches Only"]
+            ["Active Build Hunt", "All Live Deals", "Checklist Matches Only"]
         )
         self.live_focus_dropdown.connect("notify::selected", self._on_live_filter_debounced)
 
@@ -1076,6 +1081,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_max_price_input.connect("value-changed", self._on_live_filter_debounced)
 
         self.live_hide_high_scam_check = Gtk.CheckButton(label="Hide high scam risk")
+        self.live_show_bought_categories_check = Gtk.CheckButton(label="Show Bought Categories")
         self.live_hide_high_scam_check.connect("toggled", self._on_live_filter_debounced)
 
         apply_filters_button = Gtk.Button(label="Apply Filters")
@@ -1084,6 +1090,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
         clear_filters_button = Gtk.Button(label="Clear Filters")
         clear_filters_button.connect("clicked", self._on_clear_live_filters_clicked)
+
+        clear_stale_button = Gtk.Button(label="Clear Stale Live Results")
+        clear_stale_button.connect("clicked", self._on_clear_stale_live_results_clicked)
 
         search_text_button = Gtk.Button(label="Search Selected Filter")
         search_text_button.connect("clicked", self._on_search_live_text_clicked)
@@ -1103,8 +1112,10 @@ class MainWindow(Gtk.ApplicationWindow):
         filter_grid.attach(self._form_label("Max Price"), 2, 3, 1, 1)
         filter_grid.attach(self.live_max_price_input, 3, 3, 1, 1)
         filter_grid.attach(self.live_hide_high_scam_check, 1, 4, 1, 1)
-        filter_grid.attach(apply_filters_button, 2, 4, 1, 1)
-        filter_grid.attach(clear_filters_button, 3, 4, 1, 1)
+        filter_grid.attach(self.live_show_bought_categories_check, 2, 4, 1, 1)
+        filter_grid.attach(apply_filters_button, 3, 4, 1, 1)
+        filter_grid.attach(clear_filters_button, 2, 5, 1, 1)
+        filter_grid.attach(clear_stale_button, 3, 5, 1, 1)
         filter_grid.attach(search_text_button, 1, 5, 3, 1)
 
         filter_card.set_child(filter_grid)
@@ -1666,7 +1677,12 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_part_status_clicked(self, _button: Gtk.Button, part_id: int, status: str) -> None:
         self.pc_builder_service.update_part_status(part_id, status)
+        self.active_build_service.set_part_status(self.pc_builder_service.get_part(part_id).part_type, status) if hasattr(self.pc_builder_service, "get_part") else None
+        self.active_build_service.pause_obsolete_saved_searches(self.config_manager)
+        self.active_build_service.clear_stale_live_results(self.search_manager)
         self._refresh_pc_builder()
+        self._refresh_live_results(force=True)
+        self._refresh_saved_searches()
 
     def _on_analyse_listing_clicked(self, _button: Gtk.Button) -> None:
         title = self.checker_title_entry.get_text().strip()
@@ -1917,6 +1933,27 @@ class MainWindow(Gtk.ApplicationWindow):
             return
 
         self._clear_box(self.pc_summary_box)
+
+
+        if hasattr(self, "pc_summary_box"):
+            self.pc_summary_box.append(
+                self._section_card(
+                    "Active Build Hunt Summary",
+                    self.active_build_service.active_hunt_lines(),
+                )
+            )
+            self.pc_summary_box.append(
+                self._section_card(
+                    "Bought Parts + Remaining Budget",
+                    self.active_build_service.cost_overview_lines(),
+                )
+            )
+            self.pc_summary_box.append(
+                self._section_card(
+                    "Active Search Plan",
+                    self.active_build_service.search_plan_lines(),
+                )
+            )
 
         if hasattr(self, "compatibility_box"):
             self._clear_box(self.compatibility_box)
@@ -2454,54 +2491,21 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_pc_builder()
 
     def _on_search_needed_parts_clicked(self, _button: Gtk.Button) -> None:
-        from dealwise.models import SavedSearch
-
-        build_path = self._current_build_path()
-        queries = self.pc_builder_service.needed_part_search_queries(build_path)
-        existing = {
-            search.query.lower().strip()
-            for search in self.config_manager.load_saved_searches()
-        }
-
-        added = 0
-
-        for query in queries:
-            if not query or query.lower().strip() in existing:
-                continue
-
-            search = SavedSearch.create(
-                query=query,
-                marketplace="Vinted",
-                min_price=None,
-                max_price=None,
-                condition="Any",
-                excluded_keywords=[
-                    "broken",
-                    "faulty",
-                    "wanted",
-                    "laptop",
-                    "notebook",
-                    "zenbook",
-                    "macbook",
-                    "ipad",
-                    "tablet",
-                    "camera",
-                    "airpods",
-                ],
-                refresh_interval_minutes=5,
-            )
-            self.config_manager.add_saved_search(search)
-            existing.add(query.lower().strip())
-            added += 1
-
-        self._refresh_saved_searches()
-        started = self.search_manager.refresh_all_saved_searches()
+        self.active_build_service.seed_current_real_build()
+        created = self.active_build_service.create_or_refresh_active_searches(
+            self.config_manager,
+            self.search_manager,
+        )
+        removed = self.active_build_service.clear_stale_live_results(self.search_manager)
 
         if hasattr(self, "live_status_label"):
             self.live_status_label.set_text(
-                f"Created {added} checklist searches. Started {started} refresh worker(s)."
+                f"Active Build Hunt refreshed. Created {created} active search(es), cleared {removed} stale live result(s)."
             )
 
+        self._refresh_saved_searches()
+        self._refresh_pc_builder()
+        self._refresh_live_results(force=True)
         self._refresh_runtime_stats()
 
     def _on_part_target_selected_clicked(self, _button: Gtk.Button, part_id: int, dropdown: Gtk.DropDown) -> None:
@@ -2706,6 +2710,17 @@ class MainWindow(Gtk.ApplicationWindow):
             else:
                 self.live_status_label.set_text("Search could not start. Check cooldown or connector status.")
 
+        self._refresh_runtime_stats()
+
+    def _on_clear_stale_live_results_clicked(self, _button: Gtk.Button) -> None:
+        removed = self.active_build_service.clear_stale_live_results(self.search_manager)
+
+        if hasattr(self, "live_status_label"):
+            self.live_status_label.set_text(
+                f"Cleared {removed} stale live result(s). Database listings and price history were preserved."
+            )
+
+        self._refresh_live_results(force=True)
         self._refresh_runtime_stats()
 
     def _on_apply_live_filters_clicked(self, _button: Gtk.Button) -> None:
@@ -3095,30 +3110,60 @@ class MainWindow(Gtk.ApplicationWindow):
         excluded_keys: set[str] | None = None,
     ) -> list[StoredListing]:
         excluded_keys = excluded_keys or set()
-        saved_statuses = {
-            "Watching",
-            "Favourite",
-            "Bought",
-            "Negotiating",
-            "Evidence Requested",
-            "Buying Candidate",
-        }
+        show_bought = self.live_show_bought_categories_check.get_active() if hasattr(self, "live_show_bought_categories_check") else False
+        focus_filter = self._dropdown_text(self.live_focus_dropdown) if hasattr(self, "live_focus_dropdown") else "Active Build Hunt"
+        part_filter = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
+        search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""
+        max_price = self.live_max_price_input.get_value() if hasattr(self, "live_max_price_input") else 0
 
-        filtered = self._filter_stored_live_results(
-            [
-                listing
-                for listing in listings
-                if listing.dedupe_key not in excluded_keys
-                and listing.status not in saved_statuses
-            ]
-        )
+        filtered: list[StoredListing] = []
 
-        if hasattr(self, "live_hide_high_scam_check") and self.live_hide_high_scam_check.get_active():
-            filtered = [
-                listing
-                for listing in filtered
-                if self._analyse_stored_listing_with_history(listing).scam_risk < 6
-            ]
+        for listing in listings:
+            if listing.dedupe_key in excluded_keys:
+                continue
+
+            if listing.status in {"Favourite", "Watching", "Bought", "Evidence Requested", "Buying Candidate"}:
+                continue
+
+            source_query = listing.source_query or ""
+            category = self.active_build_service.category_for_text(f"{listing.title} {source_query}")
+
+            if focus_filter == "Active Build Hunt":
+                if not self.active_build_service.should_show_listing(
+                    listing.title,
+                    source_query,
+                    show_bought_categories=show_bought,
+                    default_active_hunt=True,
+                ):
+                    continue
+
+            if part_filter != "All Parts" and category != part_filter:
+                continue
+
+            if not self.active_build_service.is_relevant_for_category(category, listing.title, source_query):
+                continue
+
+            if hasattr(self, "_listing_matches_product_filter") and not self._listing_matches_product_filter(listing.title):
+                continue
+
+            haystack = " ".join(
+                [
+                    listing.title,
+                    listing.marketplace,
+                    listing.seller_name or "",
+                    listing.location or "",
+                    source_query,
+                    category,
+                ]
+            ).lower()
+
+            if search_text and search_text not in haystack:
+                continue
+
+            if max_price > 0 and listing.price is not None and listing.price > max_price:
+                continue
+
+            filtered.append(listing)
 
         sort_mode = self._dropdown_text(self.live_sort_dropdown) if hasattr(self, "live_sort_dropdown") else "Newest First"
 
@@ -3130,29 +3175,15 @@ class MainWindow(Gtk.ApplicationWindow):
         elif sort_mode == "Highest Price":
             filtered.sort(key=price_value, reverse=True)
         elif sort_mode == "Highest Deal Score":
-            filtered.sort(
-                key=lambda listing: self._analyse_stored_listing_with_history(listing).deal_score,
-                reverse=True,
-            )
+            filtered.sort(key=lambda listing: self._analyse_stored_listing_with_history(listing).deal_score, reverse=True)
         elif sort_mode == "Lowest Scam Risk":
-            filtered.sort(
-                key=lambda listing: self._analyse_stored_listing_with_history(listing).scam_risk
-            )
+            filtered.sort(key=lambda listing: self._analyse_stored_listing_with_history(listing).scam_risk)
         elif sort_mode == "Highest Build Fit":
-            filtered.sort(
-                key=lambda listing: self._analyse_stored_listing_with_history(listing).build_fit,
-                reverse=True,
-            )
+            filtered.sort(key=lambda listing: self._analyse_stored_listing_with_history(listing).build_fit, reverse=True)
         elif sort_mode == "Highest Evidence Confidence":
-            filtered.sort(
-                key=lambda listing: self._analyse_stored_listing_with_history(listing).evidence_confidence,
-                reverse=True,
-            )
+            filtered.sort(key=lambda listing: self._analyse_stored_listing_with_history(listing).evidence_confidence, reverse=True)
         elif sort_mode == "Lowest Historical Price":
-            filtered.sort(
-                key=lambda listing: self._historical_price_rank(listing.title, listing.price),
-                reverse=True,
-            )
+            filtered.sort(key=lambda listing: self._historical_price_rank(listing.title, listing.price), reverse=True)
         else:
             filtered.sort(key=lambda listing: listing.last_seen_at, reverse=True)
 
@@ -3195,79 +3226,82 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _filter_and_sort_live_results(self, results: list[MarketplaceListing]) -> list[MarketplaceListing]:
         search_text = self.live_search_entry.get_text().lower().strip() if hasattr(self, "live_search_entry") else ""
-        focus = self._dropdown_text(self.live_focus_dropdown) if hasattr(self, "live_focus_dropdown") else "All Live Deals"
+        focus_filter = self._dropdown_text(self.live_focus_dropdown) if hasattr(self, "live_focus_dropdown") else "Active Build Hunt"
         part_filter = self._dropdown_text(self.live_part_dropdown) if hasattr(self, "live_part_dropdown") else "All Parts"
-        priority_mode = self._dropdown_text(self.live_priority_dropdown) if hasattr(self, "live_priority_dropdown") else "Best overall first"
-        sort_mode = self._dropdown_text(self.live_sort_dropdown) if hasattr(self, "live_sort_dropdown") else "Newest First"
         max_price = self.live_max_price_input.get_value() if hasattr(self, "live_max_price_input") else 0
-        hide_high_scam = self.live_hide_high_scam_check.get_active() if hasattr(self, "live_hide_high_scam_check") else False
+        show_bought = self.live_show_bought_categories_check.get_active() if hasattr(self, "live_show_bought_categories_check") else False
 
-        scored: list[tuple[MarketplaceListing, object, str, bool, float]] = []
+        filtered: list[MarketplaceListing] = []
 
         for listing in results:
-            inferred_part = infer_part_type(listing.title)
-            is_full_pc = inferred_part == "Full PC"
+            source_query = listing.source_query or ""
+            category = self.active_build_service.category_for_text(f"{listing.title} {source_query}")
+
+            if focus_filter == "Active Build Hunt":
+                if not self.active_build_service.should_show_listing(
+                    listing.title,
+                    source_query,
+                    show_bought_categories=show_bought,
+                    default_active_hunt=True,
+                ):
+                    continue
+
+            if part_filter != "All Parts" and category != part_filter:
+                continue
+
+            if not self.active_build_service.is_relevant_for_category(category, listing.title, source_query):
+                continue
+
+            if hasattr(self, "_listing_matches_product_filter") and not self._listing_matches_product_filter(listing.title):
+                continue
 
             haystack = " ".join(
                 [
                     listing.title,
                     listing.marketplace,
                     listing.seller_name or "",
-                    listing.source_query or "",
-                    inferred_part,
+                    listing.location or "",
+                    source_query,
+                    category,
                 ]
             ).lower()
 
             if search_text and search_text not in haystack:
                 continue
 
-            if focus == "Checklist Matches Only" and not self._listing_matches_needed_parts(listing):
-                continue
-
-            if part_filter != "All Parts" and inferred_part != part_filter:
-                continue
-
-            if not self._listing_matches_product_filter(listing.title):
-                continue
-
             if max_price > 0 and listing.price is not None and listing.price > max_price:
                 continue
 
-            decision = self._analyse_marketplace_listing(listing)
+            if hasattr(self, "live_hide_high_scam_check") and self.live_hide_high_scam_check.get_active():
+                decision = self._analyse_listing_with_history(listing)
+                if decision.scam_risk >= 6:
+                    continue
 
-            if hide_high_scam and decision.scam_risk >= 6:
-                continue
+            filtered.append(listing)
 
-            history_score = self._historical_price_rank(listing.title, listing.price)
-            scored.append((listing, decision, inferred_part, is_full_pc, history_score))
+        sort_mode = self._dropdown_text(self.live_sort_dropdown) if hasattr(self, "live_sort_dropdown") else "Newest First"
 
-        def price_value(item):
-            listing, _decision, _part, _is_full_pc, _history_score = item
+        def price_value(listing: MarketplaceListing) -> float:
             return listing.price if listing.price is not None else 999999
 
         if sort_mode == "Lowest Price":
-            scored.sort(key=price_value)
+            filtered.sort(key=price_value)
         elif sort_mode == "Highest Price":
-            scored.sort(key=price_value, reverse=True)
+            filtered.sort(key=price_value, reverse=True)
         elif sort_mode == "Highest Deal Score":
-            scored.sort(key=lambda item: item[1].deal_score, reverse=True)
+            filtered.sort(key=lambda listing: self._analyse_listing_with_history(listing).deal_score, reverse=True)
         elif sort_mode == "Lowest Scam Risk":
-            scored.sort(key=lambda item: item[1].scam_risk)
+            filtered.sort(key=lambda listing: self._analyse_listing_with_history(listing).scam_risk)
         elif sort_mode == "Highest Build Fit":
-            scored.sort(key=lambda item: item[1].build_fit, reverse=True)
+            filtered.sort(key=lambda listing: self._analyse_listing_with_history(listing).build_fit, reverse=True)
         elif sort_mode == "Highest Evidence Confidence":
-            scored.sort(key=lambda item: item[1].evidence_confidence, reverse=True)
+            filtered.sort(key=lambda listing: self._analyse_listing_with_history(listing).evidence_confidence, reverse=True)
         elif sort_mode == "Lowest Historical Price":
-            scored.sort(key=lambda item: item[4], reverse=True)
+            filtered.sort(key=lambda listing: self._historical_price_rank(listing.title, listing.price), reverse=True)
         else:
-            scored.sort(key=lambda item: item[0].found_at, reverse=True)
+            filtered.sort(key=lambda listing: listing.found_at, reverse=True)
 
-        if priority_mode == "PC parts first":
-            scored.sort(key=lambda item: 1 if item[3] else 0)
-        elif priority_mode == "Full PCs first":
-            scored.sort(key=lambda item: 0 if item[3] else 1)
-
-        return [item[0] for item in scored]
+        return filtered
 
     def _is_full_pc_listing(self, title: str) -> bool:
         lower = title.lower()
