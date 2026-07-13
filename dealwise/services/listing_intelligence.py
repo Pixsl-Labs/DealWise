@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from dealwise.repositories.listing_repository import StoredListing, infer_part_type
+from dealwise.services.product_classifier import ProductClassifier
 
 
 @dataclass(slots=True)
@@ -74,6 +75,9 @@ class ListingIntelligenceService:
     Phase 6 can now adjust these scores further using stored observed prices.
     """
 
+    def __init__(self) -> None:
+        self.product_classifier = ProductClassifier()
+
     def analyse(
         self,
         title: str,
@@ -87,6 +91,36 @@ class ListingIntelligenceService:
         safe_part_type = part_type or infer_part_type(title)
         lower_title = title.lower()
         reasoning: list[str] = []
+
+        classification = self.product_classifier.classify(
+            title=title,
+            source_query="",
+            category_hint=safe_part_type,
+            description=notes,
+        )
+
+        if safe_part_type in {"GPU", "RAM", "Storage"} and not classification.is_deal_candidate:
+            reason = classification.rejection_reason or classification.bucket
+            return ListingDecision(
+                decision=f"REJECTED: {reason}",
+                deal_score=0 if classification.deal_score_cap == 0 else min(40, classification.deal_score_cap or 40),
+                scam_risk=max(7.5, classification.scam_risk),
+                build_fit=0,
+                budget_fit=0,
+                evidence_confidence=classification.evidence_score,
+                urgency_score=0,
+                reasoning=[
+                    f"Product classification: {classification.bucket}.",
+                    reason,
+                    "Deal scoring was blocked because identity/category validation failed.",
+                ] + classification.why,
+                seller_message=self.generate_seller_message(
+                    title=title,
+                    part_type=safe_part_type,
+                    decision="AVOID",
+                ),
+            )
+
         buyer_flags = buyer_risk_flags(f"{title} {notes}")
 
         expected_low, expected_high, matched_model = self._expected_price_range(lower_title, safe_part_type)
@@ -172,6 +206,10 @@ class ListingIntelligenceService:
             evidence_confidence -= min(25, len(buyer_flags) * 6)
             deal_score -= min(12, len(buyer_flags) * 3)
             reasoning.append("Buyer evidence flags: " + ", ".join(buyer_flags[:3]) + ".")
+
+        if safe_part_type in {"GPU", "RAM", "Storage"} and classification.identity_confidence < 60:
+            deal_score = min(deal_score, 40)
+            reasoning.append("Product identity confidence is below 60/100, so Deal Score is capped at 40.")
 
         deal_score = clamp_int(deal_score, 0, 100)
         build_fit = clamp_int(build_fit, 0, 100)

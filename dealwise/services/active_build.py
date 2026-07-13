@@ -9,6 +9,7 @@ from typing import Any, Callable
 from dealwise.config import ConfigManager
 from dealwise.data.database import DatabaseManager
 from dealwise.models import MarketplaceListing, SavedSearch
+from dealwise.services.product_classifier import ProductClassifier
 
 
 SEARCH_ACTIVE_STATUSES = {
@@ -80,6 +81,7 @@ class ActiveBuildService:
 
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
+        self.product_classifier = ProductClassifier()
         self.ensure_schema()
 
     def ensure_schema(self) -> None:
@@ -811,16 +813,15 @@ class ActiveBuildService:
         return "Unknown"
 
     def is_relevant_for_category(self, category: str, title: str, source_query: str = "") -> bool:
+        if category in {"GPU", "RAM", "Storage"}:
+            classification = self.product_classifier.classify(
+                title=title,
+                source_query=source_query,
+                category_hint=category,
+            )
+            return classification.is_deal_candidate
+
         lower = f" {title.lower()} {source_query.lower()} "
-
-        if category == "GPU":
-            return self._gpu_relevant(lower)
-
-        if category == "RAM":
-            return self._ram_relevant(lower)
-
-        if category == "Storage":
-            return self._storage_relevant(lower)
 
         if category == "Case":
             return self._case_relevant(lower)

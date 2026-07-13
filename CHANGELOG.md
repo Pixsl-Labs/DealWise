@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.8.3] - 2026-07-13
+
+### Added
+
+- Product classification gate before deal scoring.
+- Active Hunt session/cache/classification database tables.
+- Source adapter foundation with automatic Vinted and assisted/unavailable statuses for other sources.
+- Hunt Active Parts and Cancel Hunt controls in Live Deals.
+- Product classifier tests for wrong GPU models, replacement parts, RAM rejection and SSD rejection.
+- Active Hunt session tests.
+
+### Fixed
+
+- Sapphire Tri-X R9 290 can no longer score as an RX 7700 XT deal.
+- XFX replacement fan assemblies can no longer receive normal GPU Deal Scores.
+- Accessory/replacement/empty-box/unrelated listings are blocked before score calculation.
+- GPU/RAM/SSD listings now require product identity validation before entering Active Build Hunt.
+- Low identity confidence caps Deal Score at 40.
+
+### Notes
+
+- README intentionally not changed.
+- No paid API added.
+- No marketplace passwords or cookies are stored.
+- Vinted remains the only automatic source in this patch.
+- eBay, Gumtree, CeX, Facebook and retail sources are represented safely as assisted/reference sources until proper adapters are implemented.
+
 ## [0.8.2] - 2026-07-11
 
 ### Added

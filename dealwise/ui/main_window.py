@@ -17,6 +17,7 @@ from dealwise.services.listing_intelligence import ListingIntelligenceService
 from dealwise.services.pc_builder_service import PCBuilderService
 from dealwise.services.search_manager import SearchManager
 from dealwise.services.active_build import ActiveBuildService
+from dealwise.services.active_hunt_session import ActiveHuntSessionService
 from dealwise.services.ram_hunt import RAMHuntProfile, RAMHuntService
 from dealwise.services.build_catalog import BUILD_PATH_OPTIONS, USE_CASE_OPTIONS
 from dealwise.services.image_cache import ImageCacheService
@@ -216,6 +217,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.active_build_service.seed_current_real_build()
         self.active_build_service.pause_obsolete_saved_searches(self.config_manager)
         self.active_build_service.clear_stale_live_results(self.search_manager)
+        self.active_hunt_session_service = ActiveHuntSessionService(self.pc_builder_service.database, self.active_build_service)
         self.listing_intelligence_service = listing_intelligence_service
 
         self.set_title(APP_NAME)
@@ -1001,8 +1003,17 @@ class MainWindow(Gtk.ApplicationWindow):
         view_results_button = Gtk.Button(label="View Results")
         view_results_button.connect("clicked", self._on_view_live_results_clicked)
 
+        hunt_active_button = Gtk.Button(label="Hunt Active Parts")
+        hunt_active_button.add_css_class("suggested-action")
+        hunt_active_button.connect("clicked", self._on_hunt_active_parts_clicked)
+
+        cancel_hunt_button = Gtk.Button(label="Cancel Hunt")
+        cancel_hunt_button.connect("clicked", self._on_cancel_hunt_clicked)
+
         top_row.append(title_box)
         top_row.append(search_parts_button)
+        top_row.append(hunt_active_button)
+        top_row.append(cancel_hunt_button)
         top_row.append(refresh_button)
         top_row.append(view_results_button)
         page.append(top_row)
@@ -1022,6 +1033,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self.live_results_hint_label = self._muted_label("Tip: choose Part/Product or use Search Selected Filter for focused results.")
         status_box.append(self.live_results_hint_label)
+
+        self.active_hunt_progress_label = self._muted_label("Active Hunt idle.")
+        status_box.append(self.active_hunt_progress_label)
 
         status_card.set_child(status_box)
         page.append(status_card)
@@ -2490,6 +2504,36 @@ class MainWindow(Gtk.ApplicationWindow):
         )
         self._refresh_pc_builder()
 
+    def _on_hunt_active_parts_clicked(self, _button: Gtk.Button) -> None:
+        stats = self.active_hunt_session_service.start_session()
+        created = self.active_build_service.create_or_refresh_active_searches(
+            self.config_manager,
+            self.search_manager,
+        )
+        removed = self.active_build_service.clear_stale_live_results(self.search_manager)
+
+        source_lines = self.active_hunt_session_service.source_status_lines()
+        if hasattr(self, "active_hunt_progress_label"):
+            self.active_hunt_progress_label.set_text(
+                f"Active Hunt started: {', '.join(stats.active_parts)} | "
+                f"{len(stats.generated_queries)} queries | created {created} saved search(es) | "
+                f"cleared {removed} stale result(s). Sources: {' / '.join(source_lines[:4])}"
+            )
+
+        self._refresh_saved_searches()
+        self._refresh_pc_builder()
+        self._refresh_live_results(force=True)
+        self._refresh_runtime_stats()
+
+    def _on_cancel_hunt_clicked(self, _button: Gtk.Button) -> None:
+        self.active_hunt_session_service.cancel()
+
+        if hasattr(self, "active_hunt_progress_label"):
+            self.active_hunt_progress_label.set_text("Active Hunt cancelled. Pending future work will use cancellation-aware source workers.")
+
+        self._refresh_live_results(force=True)
+
+
     def _on_search_needed_parts_clicked(self, _button: Gtk.Button) -> None:
         self.active_build_service.seed_current_real_build()
         created = self.active_build_service.create_or_refresh_active_searches(
@@ -3138,6 +3182,11 @@ class MainWindow(Gtk.ApplicationWindow):
                     continue
 
             if part_filter != "All Parts" and category != part_filter:
+                continue
+
+            classification = self.active_hunt_session_service.classify_listing(listing, category)
+
+            if not classification.is_deal_candidate:
                 continue
 
             if not self.active_build_service.is_relevant_for_category(category, listing.title, source_query):
