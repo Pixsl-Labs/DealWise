@@ -45,6 +45,7 @@ class ConfigManager:
                     "notifications_enabled": True,
                     "start_minimised": False,
                     "marketplaces_enabled": ["Vinted"],
+                    "live_hide_high_scam_risk": True,
                 },
             )
 

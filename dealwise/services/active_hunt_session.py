@@ -35,7 +35,7 @@ class HuntSessionStats:
 class ActiveHuntSessionService:
     """Session/cache/classification foundation for the Active Hunt workflow."""
 
-    RULE_VERSION = "0.8.3"
+    RULE_VERSION = "0.8.5.0"
 
     def __init__(self, database: DatabaseManager, active_build_service: ActiveBuildService) -> None:
         self.database = database

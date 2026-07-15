@@ -1095,6 +1095,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.live_max_price_input.connect("value-changed", self._on_live_filter_debounced)
 
         self.live_hide_high_scam_check = Gtk.CheckButton(label="Hide high scam risk")
+        self.live_hide_high_scam_check.set_active(bool(self.config_manager.load_config().get("live_hide_high_scam_risk", True)))
+        self.live_hide_high_scam_check.connect("toggled", self._on_live_hide_high_scam_toggled)
         self.live_show_bought_categories_check = Gtk.CheckButton(label="Show Bought Categories")
         self.live_hide_high_scam_check.connect("toggled", self._on_live_filter_debounced)
 
@@ -1424,6 +1426,18 @@ class MainWindow(Gtk.ApplicationWindow):
         self._refresh_live_results(force=True)
         self._refresh_persistent_listings()
         self._refresh_runtime_stats()
+
+
+    def _on_live_hide_high_scam_toggled(self, check: Gtk.CheckButton) -> None:
+        config = self.config_manager.load_config()
+        config["live_hide_high_scam_risk"] = bool(check.get_active())
+        self.config_manager.save_config(config)
+
+        try:
+            self._refresh_live_results(force=True)
+        except TypeError:
+            self._refresh_live_results()
+
 
     def _on_manual_refresh_clicked(self, _button: Gtk.Button) -> None:
         started_count = self.search_manager.refresh_all_saved_searches()

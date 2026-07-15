@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.5.0] - 2026-07-15
+
+### Fixed
+
+- App version now correctly shows v0.8.5.0.
+- Hide high scam risk now defaults on and persists when the user toggles it.
+- RAM 32GB DDR5 filter no longer accepts 64GB 2x32GB kits.
+- RAM hunt blocks Kingston Fury Impact / SO-DIMM-style laptop listings from the main active hunt.
+- Active Hunt classification cache version bumped so stale accepted/rejected decisions refresh.
+
+### Notes
+
+- README intentionally not changed.
+- No marketplace messages, purchases, bids, checkout, login or account actions are automated.
+
 ## [0.8.3] - 2026-07-13
 
 ### Added
