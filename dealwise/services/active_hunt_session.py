@@ -230,33 +230,69 @@ class ActiveHuntSessionService:
 
     def classify_listing(
         self,
-        listing: MarketplaceListing,
+        listing,
         category_hint: str = "",
     ) -> ProductClassification:
+        """Classify either a live MarketplaceListing or a stored DB listing.
+
+        v0.8.3 originally assumed every listing had MarketplaceListing fields
+        such as id/raw. StoredListing uses dedupe_key/raw_json instead, which
+        could crash Live Deals before anything rendered.
+        """
+
         fingerprint = self.fingerprint_for_listing(listing)
         cached = self._read_cached_classification(fingerprint)
 
         if cached is not None:
             return cached
 
+        title = str(getattr(listing, "title", "") or "")
+        source_query = str(getattr(listing, "source_query", "") or "")
+
+        raw_description = ""
+        raw = getattr(listing, "raw", None)
+
+        if isinstance(raw, dict):
+            raw_description = json.dumps(raw, sort_keys=True)
+        elif hasattr(listing, "raw_json"):
+            raw_description = str(getattr(listing, "raw_json", "") or "")
+
         classification = self.classifier.classify(
-            title=listing.title,
-            source_query=listing.source_query or "",
+            title=title,
+            source_query=source_query,
             category_hint=category_hint,
-            description=json.dumps(listing.raw, sort_keys=True) if listing.raw else "",
+            description=raw_description,
         )
         self._store_classification(fingerprint, listing, classification)
         return classification
 
-    def fingerprint_for_listing(self, listing: MarketplaceListing) -> str:
+    def fingerprint_for_listing(self, listing) -> str:
+        """Stable fingerprint for live and stored listings."""
+
+        marketplace = str(getattr(listing, "marketplace", "") or "").lower().strip()
+        external_id = str(
+            getattr(listing, "id", "")
+            or getattr(listing, "listing_id", "")
+            or getattr(listing, "dedupe_key", "")
+            or ""
+        ).lower().strip()
+        url = str(getattr(listing, "url", "") or "").lower().strip()
+        title = str(getattr(listing, "title", "") or "").lower().strip()
+        price = str(getattr(listing, "price", "") or "")
+        seller = str(
+            getattr(listing, "seller_name", "")
+            or getattr(listing, "seller", "")
+            or ""
+        ).lower().strip()
+
         payload = "|".join(
             [
-                listing.marketplace.lower().strip(),
-                listing.id.lower().strip(),
-                listing.url.lower().strip(),
-                listing.title.lower().strip(),
-                str(listing.price or ""),
-                listing.seller_name or "",
+                marketplace,
+                external_id,
+                url,
+                title,
+                price,
+                seller,
             ]
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -364,10 +400,30 @@ class ActiveHuntSessionService:
     def _store_classification(
         self,
         fingerprint: str,
-        listing: MarketplaceListing,
+        listing,
         classification: ProductClassification,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
+
+        listing_key = str(
+            getattr(listing, "dedupe_key", "")
+            or getattr(listing, "id", "")
+            or fingerprint
+        )
+        title = str(getattr(listing, "title", "") or "")
+        marketplace = str(getattr(listing, "marketplace", "") or "")
+        external_id = str(
+            getattr(listing, "id", "")
+            or getattr(listing, "listing_id", "")
+            or listing_key
+        )
+        url = str(getattr(listing, "url", "") or "")
+        price = getattr(listing, "price", None)
+        seller = str(
+            getattr(listing, "seller_name", "")
+            or getattr(listing, "seller", "")
+            or ""
+        )
 
         with self.database.connect() as connection:
             connection.execute(
@@ -394,9 +450,9 @@ class ActiveHuntSessionService:
                 """,
                 (
                     fingerprint,
-                    listing.dedupe_key,
-                    listing.title,
-                    listing.marketplace,
+                    listing_key,
+                    title,
+                    marketplace,
                     classification.category,
                     classification.bucket,
                     classification.identity_confidence,
@@ -426,7 +482,7 @@ class ActiveHuntSessionService:
                     """,
                     (
                         fingerprint,
-                        listing.title,
+                        title,
                         classification.rejection_reason or classification.bucket,
                         now,
                     ),
@@ -449,12 +505,12 @@ class ActiveHuntSessionService:
                 """,
                 (
                     fingerprint,
-                    listing.marketplace,
-                    listing.id,
-                    listing.url,
-                    listing.title,
-                    listing.price,
-                    listing.seller_name or "",
+                    marketplace,
+                    external_id,
+                    url,
+                    title,
+                    price,
+                    seller,
                     now,
                 ),
             )
